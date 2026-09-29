@@ -36,18 +36,27 @@ let currentRadio=null, radioTries=5, radioOver=false, radioLastDistance=null, ra
 let currentFlight=null, flightTries=5, flightOver=false, flightLastDistance=null, flightHistory=[];
 let currentNews=null, newsTries=5, newsOver=false, newsLastDistance=null, newsHistory=[];
 let audioContext=null, analyser=null, sourceNode=null, raf=null, smoothBars=[], normalizedEnvelope=.12;
+let resultEffect=null, resultEffectTimer=null;
 
 function normalize(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[’']/g,"").replace(/[^a-zA-Z0-9]+/g," ").trim().toLowerCase()}
 const LOOKUP=new Map(COUNTRY_NAMES.map(n=>[normalize(n),n])); for(const [a,n] of ALIASES) LOOKUP.set(normalize(a),n);
 function levenshtein(a,b){a=normalize(a);b=normalize(b);const p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){let last=p[0];p[0]=i;for(let j=1;j<=b.length;j++){const old=p[j];p[j]=Math.min(p[j]+1,p[j-1]+1,last+(a[i-1]===b[j-1]?0:1));last=old}}return p[b.length]}
-function canonicalCountry(v){const k=normalize(v);if(!k)return null;if(LOOKUP.has(k))return LOOKUP.get(k);let best=null,d=Infinity;for(const [ck,n] of LOOKUP){const x=levenshtein(k,ck);if(x<d){d=x;best=n}}const limit=k.length<=5?1:k.length<=9?2:3;return d<=limit?best:null}
+function canonicalCountry(v){let k=normalize(v);if(!k)return null;k=k.replace(/^the\s+/,"");if(LOOKUP.has(k))return LOOKUP.get(k);let best=null,d=Infinity;for(const [ck,n] of LOOKUP){const x=levenshtein(k,ck);if(x<d){d=x;best=n}}const limit=k.length<=5?1:k.length<=9?2:3;return d<=limit?best:null}
 function comparable(v){return normalize(canonicalCountry(v)||v).replace(/^the /,"")}
 function escapeHtml(v){return String(v??"").replace(/[&<>"\']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
-function flashBorderBeam(el,result){
-  if(!el)return;
-  el.classList.remove("beam-wrong","beam-correct");
-  void el.offsetWidth;
-  el.classList.add(result==="correct"?"beam-correct":"beam-wrong");
+function flashBorderBeam(_el,result){
+  const duration=result==="correct"?5000:3000;
+  const cls=result==="correct"?"beam-correct":"beam-wrong";
+  if(resultEffectTimer)clearTimeout(resultEffectTimer);
+  document.body.classList.remove("beam-wrong","beam-correct");
+  void document.body.offsetWidth;
+  resultEffect=result;
+  document.body.classList.add(cls);
+  resultEffectTimer=setTimeout(()=>{
+    document.body.classList.remove("beam-wrong","beam-correct");
+    resultEffect=null;
+    resultEffectTimer=null;
+  },duration);
 }
 async function fetchJson(url){const r=await fetch(url,{cache:"no-store"});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||`${r.status} ${r.statusText}`);return b}
 function flagFor(country){const canonical=canonicalCountry(country)||country;const code=COUNTRY_CODE.get(normalize(canonical));return code?String.fromCodePoint(...code.split("").map(c=>127397+c.charCodeAt(0))):"🌐"}
@@ -103,7 +112,7 @@ function drawWave(){
     const neighbor=(raw[Math.max(0,i-1)]+raw[i]+raw[Math.min(count-1,i+1)])/3;const target=raw[i]*.72+neighbor*.28;const cur=smoothBars[i]??.018;const ease=target>cur?.27:.14;smoothBars[i]=cur+(target-cur)*ease;
   }
   ctx.lineWidth=Math.max(1.3*d,2);ctx.lineCap="round";ctx.shadowColor="rgba(98,174,240,.18)";ctx.shadowBlur=3*d;
-  for(let i=0;i<count;i++){const x=(i+.5)*spacing,half=Math.max(1.4*d,smoothBars[i]*h*.43),edge=Math.abs((i/(count-1))-.5)*2,alpha=.66+(1-edge)*.28;ctx.strokeStyle=`rgba(9,127,232,${alpha.toFixed(3)})`;ctx.beginPath();ctx.moveTo(x,mid-half);ctx.lineTo(x,mid+half);ctx.stroke()}
+  for(let i=0;i<count;i++){const x=(i+.5)*spacing,half=Math.max(1.4*d,smoothBars[i]*h*.43),edge=Math.abs((i/(count-1))-.5)*2,alpha=.66+(1-edge)*.28;const beamRgb=resultEffect==="correct"?[34,197,94]:resultEffect==="wrong"?[239,68,68]:[9,127,232];ctx.strokeStyle=`rgba(${beamRgb[0]},${beamRgb[1]},${beamRgb[2]},${alpha.toFixed(3)})`;ctx.beginPath();ctx.moveTo(x,mid-half);ctx.lineTo(x,mid+half);ctx.stroke()}
   ctx.shadowBlur=0;raf=requestAnimationFrame(drawWave);
 }
 async function tryPlay(user=false){try{if(user)await ensureAudioGraph();await radio.audio.play();if(user)await ensureAudioGraph();setPlaying(true);setState("Live audio playing");return true}catch{setPlaying(false);setState("Tap play to start audio");return false}}
