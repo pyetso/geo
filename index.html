@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#e6f3fe" />
+  <title>GeoHub Radio</title>
+  <meta name="description" content="Listen to a live radio station and guess the country." />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="shell">
+    <div class="micro-header">
+      <div class="brand"><span class="brand-dot" aria-hidden="true"></span>GeoHub Radio</div>
+      <div class="round-meta"><span id="score">0</span> pts <span class="dot">·</span> <span id="attempts">5</span> tries</div>
+    </div>
+
+    <section class="radio-stage" aria-label="Radio country guessing game">
+      <div class="wave-wrap" id="wave-wrap">
+        <canvas id="waveform" aria-label="Live audio waveform"></canvas>
+        <div id="audio-state" class="audio-state">Finding a station…</div>
+      </div>
+
+      <audio id="radio-player" preload="auto" crossorigin="anonymous"></audio>
+
+      <div class="player-row" aria-label="Radio controls">
+        <button class="circle-control primary" id="play-pause" type="button" aria-label="Play radio" title="Play or pause">
+          <svg class="icon-pause" viewBox="0 0 24 24"><path d="M8 6v12M16 6v12"/></svg>
+          <svg class="icon-play" viewBox="0 0 24 24"><path d="m9 7 8 5-8 5Z"/></svg>
+        </button>
+        <button class="circle-control" id="restart" type="button" aria-label="Restart stream" title="Restart stream">
+          <svg viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l4 4a7 7 0 1 1-1.4 8.2"/></svg>
+        </button>
+        <div class="volume-control">
+          <button class="circle-control" id="volume-toggle" type="button" aria-label="Volume" title="Volume">
+            <svg viewBox="0 0 24 24"><path d="M5 10v4h3l4 4V6l-4 4H5Zm10-1a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11"/></svg>
+          </button>
+          <div class="volume-popover">
+            <input id="volume" type="range" min="0" max="1" step="0.01" value="0.72" aria-label="Radio volume" />
+          </div>
+        </div>
+        <span class="now-playing" id="now-playing">Mystery station</span>
+      </div>
+
+      <form class="guess-form" id="guess-form" autocomplete="off">
+        <div class="country-combobox">
+          <label class="sr-only" for="country-input">Country</label>
+          <input id="country-input" type="text" placeholder="Which country is this?" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="country-suggestions" spellcheck="false" />
+          <div class="suggestions" id="country-suggestions" role="listbox"></div>
+        </div>
+        <button class="guess-button" type="submit">Guess</button>
+      </form>
+
+      <div class="feedback" id="feedback" aria-live="polite"></div>
+      <div class="station-actions" id="station-actions" hidden>
+        <button class="text-button" id="next-after-answer" type="button">Next station <span>→</span></button>
+      </div>
+    </section>
+
+  </main>
+  <script src="./app.js" defer></script>
+</body>
+</html>
