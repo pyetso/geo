@@ -36,7 +36,7 @@ echo GeoHub Radio
 echo Opening http://localhost:%PORT%
 echo Press Ctrl+C to stop.
 echo.
-node server.js --open
+node local\server.js --open
 
 if errorlevel 1 (
   echo.

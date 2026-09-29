@@ -1,0 +1,5 @@
+local/
+TEST_LOCAL.bat
+.env
+.env.*
+README.md

@@ -50,3 +50,6 @@ Useful checks after deployment:
 - `/api/news` should return JSON or a provider error, not a Vercel function crash page.
 
 If Vercel still reports `FUNCTION_INVOCATION_FAILED`, open the deployment's **Logs > Functions** view to see the uncaught runtime exception for the exact endpoint.
+
+## Vercel runtime fix
+Browser code now lives in `client.js` and the local-only Node server lives in `local/server.js`. This prevents Vercel from auto-detecting the browser bundle as a Node server entrypoint. The root page is served as static `index.html`; only files in `/api` run as Vercel Functions.
