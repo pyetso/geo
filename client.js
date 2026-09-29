@@ -18,18 +18,18 @@ const radio = {
   view: $("radio-view"), audio: $("radio-player"), canvas: $("waveform"), state: $("audio-state"), play: $("play-pause"), restart: $("restart"),
   volumeToggle: $("volume-toggle"), volume: $("volume"), input: $("country-input"), suggestions: $("country-suggestions"), form: $("guess-form"),
   guessButton: $("guess-form").querySelector(".guess-button"), feedback: $("feedback"), next: $("next-after-answer"), actions: $("station-actions"),
-  board: $("previous-guesses"), rows: $("previous-guesses-list"), slots: $("guess-slots")
+  board: $("previous-guesses"), rows: $("previous-guesses-list"), slots: $("guess-slots"), beam: $("radio-interaction")
 };
 const flight = {
   view: $("flight-view"), from: $("flight-from"), to: $("flight-to"), number: $("flight-number"), airline: $("flight-airline"), altitude: $("flight-altitude"), speed: $("flight-speed"), marker: $("plane-marker"),
   path: $("flight-route-path"), depDot: $("flight-departure-dot"), arrDot: $("flight-arrival-dot"),
   question: $("flight-question"), input: $("flight-country-input"), suggestions: $("flight-country-suggestions"), form: $("flight-guess-form"), guessButton: $("flight-guess-form").querySelector(".guess-button"), feedback: $("flight-feedback"), actions: $("flight-actions"), next: $("next-flight"),
-  board: $("flight-previous-guesses"), rows: $("flight-previous-guesses-list"), slots: $("flight-guess-slots")
+  board: $("flight-previous-guesses"), rows: $("flight-previous-guesses-list"), slots: $("flight-guess-slots"), beam: $("flight-interaction")
 };
 const news = {
   view: $("news-view"), title: $("news-title"), description: $("news-description"), source: $("news-source"), date: $("news-date"),
   question: $("news-question"), input: $("news-country-input"), suggestions: $("news-country-suggestions"), form: $("news-guess-form"), guessButton: $("news-guess-form").querySelector(".guess-button"), feedback: $("news-feedback"), actions: $("news-actions"), next: $("next-news"),
-  board: $("news-previous-guesses"), rows: $("news-previous-guesses-list"), slots: $("news-guess-slots")
+  board: $("news-previous-guesses"), rows: $("news-previous-guesses-list"), slots: $("news-guess-slots"), beam: $("news-interaction")
 };
 
 let currentRadio=null, radioTries=5, radioOver=false, radioLastDistance=null, radioHistory=[], streamRecovery=0;
@@ -42,7 +42,13 @@ const LOOKUP=new Map(COUNTRY_NAMES.map(n=>[normalize(n),n])); for(const [a,n] of
 function levenshtein(a,b){a=normalize(a);b=normalize(b);const p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){let last=p[0];p[0]=i;for(let j=1;j<=b.length;j++){const old=p[j];p[j]=Math.min(p[j]+1,p[j-1]+1,last+(a[i-1]===b[j-1]?0:1));last=old}}return p[b.length]}
 function canonicalCountry(v){const k=normalize(v);if(!k)return null;if(LOOKUP.has(k))return LOOKUP.get(k);let best=null,d=Infinity;for(const [ck,n] of LOOKUP){const x=levenshtein(k,ck);if(x<d){d=x;best=n}}const limit=k.length<=5?1:k.length<=9?2:3;return d<=limit?best:null}
 function comparable(v){return normalize(canonicalCountry(v)||v).replace(/^the /,"")}
-function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function escapeHtml(v){return String(v??"").replace(/[&<>"\']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function flashBorderBeam(el,result){
+  if(!el)return;
+  el.classList.remove("beam-wrong","beam-correct");
+  void el.offsetWidth;
+  el.classList.add(result==="correct"?"beam-correct":"beam-wrong");
+}
 async function fetchJson(url){const r=await fetch(url,{cache:"no-store"});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||`${r.status} ${r.statusText}`);return b}
 function flagFor(country){const canonical=canonicalCountry(country)||country;const code=COUNTRY_CODE.get(normalize(canonical));return code?String.fromCodePoint(...code.split("").map(c=>127397+c.charCodeAt(0))):"🌐"}
 
@@ -120,8 +126,8 @@ async function loadStation(){
 async function checkRadioGuess(){
   if(!currentRadio||radioOver)return;const raw=radio.input.value.trim();if(!raw){radio.feedback.className="feedback wrong";radio.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){radio.feedback.className="feedback wrong";radio.feedback.textContent="Choose a country from the list, or check the spelling.";return}radio.input.value=corrected;closeRadioSuggestions();
   const correct=comparable(corrected)===comparable(currentRadio.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentRadio.answer,radioLastDistance);if(hint&&!correct)radioLastDistance=hint.km;radioHistory.push({country:corrected,hint,correct});renderRadioHistory();
-  if(correct){radioOver=true;radio.feedback.className="feedback correct";radio.feedback.innerHTML=`<strong>Correct.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
-  radioTries--;if(radioTries<=0){radioOver=true;radio.feedback.className="feedback wrong";radio.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
+  if(correct){flashBorderBeam(radio.beam,"correct");radioOver=true;radio.feedback.className="feedback correct";radio.feedback.innerHTML=`<strong>Correct.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
+  radioTries--;flashBorderBeam(radio.beam,"wrong");if(radioTries<=0){radioOver=true;radio.feedback.className="feedback wrong";radio.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
   radio.feedback.className="feedback wrong";radio.feedback.innerHTML=`<strong>Not quite.</strong> ${radioTries} ${radioTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;radio.input.value="";radio.input.focus();
 }
 function finishRadioRound(){radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=true;radio.actions.hidden=false}
@@ -142,8 +148,8 @@ async function loadFlight(){
 async function checkFlightGuess(){
   if(!currentFlight||flightOver)return;const raw=flight.input.value.trim();if(!raw){flight.feedback.className="feedback wrong";flight.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){flight.feedback.className="feedback wrong";flight.feedback.textContent="Choose a country from the list, or check the spelling.";return}flight.input.value=corrected;closeFlightSuggestions();
   const correct=comparable(corrected)===comparable(currentFlight.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentFlight.answer,flightLastDistance);if(hint&&!correct)flightLastDistance=hint.km;flightHistory.push({country:corrected,hint,correct});renderGameHistory(flight,flightHistory);
-  if(correct){flightOver=true;flight.feedback.className="feedback correct";flight.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentFlight.reveal||currentFlight.answer)}`;finishFlightRound();return}
-  flightTries--;if(flightTries<=0){flightOver=true;flight.feedback.className="feedback wrong";flight.feedback.innerHTML=`<strong>Round over.</strong> ${escapeHtml(currentFlight.reveal||`The answer was ${currentFlight.answer}.`)}`;finishFlightRound();return}
+  if(correct){flashBorderBeam(flight.beam,"correct");flightOver=true;flight.feedback.className="feedback correct";flight.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentFlight.reveal||currentFlight.answer)}`;finishFlightRound();return}
+  flightTries--;flashBorderBeam(flight.beam,"wrong");if(flightTries<=0){flightOver=true;flight.feedback.className="feedback wrong";flight.feedback.innerHTML=`<strong>Round over.</strong> ${escapeHtml(currentFlight.reveal||`The answer was ${currentFlight.answer}.`)}`;finishFlightRound();return}
   flight.feedback.className="feedback wrong";flight.feedback.innerHTML=`<strong>Not quite.</strong> ${flightTries} ${flightTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;flight.input.value="";flight.input.focus();
 }
 function finishFlightRound(){flight.input.disabled=true;flight.guessButton.disabled=true;flight.form.hidden=true;flight.actions.hidden=false}
@@ -156,8 +162,8 @@ async function loadNews(){newsOver=true;currentNews=null;newsTries=5;newsLastDis
 async function checkNewsGuess(){
   if(!currentNews||newsOver)return;const raw=news.input.value.trim();if(!raw){news.feedback.className="feedback wrong";news.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){news.feedback.className="feedback wrong";news.feedback.textContent="Choose a country from the list, or check the spelling.";return}news.input.value=corrected;closeNewsSuggestions();
   const correct=comparable(corrected)===comparable(currentNews.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentNews.answer,newsLastDistance);if(hint&&!correct)newsLastDistance=hint.km;newsHistory.push({country:corrected,hint,correct});renderGameHistory(news,newsHistory);
-  if(correct){newsOver=true;news.feedback.className="feedback correct";news.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentNews.reveal||currentNews.answer)}`;finishNewsRound();return}
-  newsTries--;if(newsTries<=0){newsOver=true;news.feedback.className="feedback wrong";news.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentNews.answer)}.`;finishNewsRound();return}
+  if(correct){flashBorderBeam(news.beam,"correct");newsOver=true;news.feedback.className="feedback correct";news.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentNews.reveal||currentNews.answer)}`;finishNewsRound();return}
+  newsTries--;flashBorderBeam(news.beam,"wrong");if(newsTries<=0){newsOver=true;news.feedback.className="feedback wrong";news.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentNews.answer)}.`;finishNewsRound();return}
   news.feedback.className="feedback wrong";news.feedback.innerHTML=`<strong>Not quite.</strong> ${newsTries} ${newsTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;news.input.value="";news.input.focus();
 }
 function finishNewsRound(){news.input.disabled=true;news.guessButton.disabled=true;news.form.hidden=true;news.actions.hidden=false}
