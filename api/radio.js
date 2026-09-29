@@ -1,4 +1,4 @@
 "use strict";
-const { radioQuestion } = require("../server");
-const { apiHandler } = require("./_response");
+const { radioQuestion } = require("../lib/game-data");
+const { apiHandler } = require("../lib/response");
 module.exports = apiHandler(radioQuestion);

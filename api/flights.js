@@ -1,4 +1,4 @@
 "use strict";
-const { flightQuestion } = require("../server");
-const { apiHandler } = require("./_response");
+const { flightQuestion } = require("../lib/game-data");
+const { apiHandler } = require("../lib/response");
 module.exports = apiHandler(flightQuestion);

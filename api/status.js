@@ -1,5 +1,5 @@
 "use strict";
-const { sendJson } = require("./_response");
+const { sendJson } = require("../lib/response");
 module.exports = async function handler(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");

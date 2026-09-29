@@ -1,4 +1,4 @@
 "use strict";
-const { newsQuestion } = require("../server");
-const { apiHandler } = require("./_response");
+const { newsQuestion } = require("../lib/game-data");
+const { apiHandler } = require("../lib/response");
 module.exports = apiHandler(newsQuestion);

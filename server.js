@@ -116,17 +116,13 @@ async function newsQuestion() {
   const key = process.env.NEWS_API_KEY;
   if (!key) return { ready: false, error: "Add NEWS_API_KEY to .env" };
 
-  for (let attempt = 0; attempt < 10; attempt++) {
+  for (let attempt = 0; attempt < 12; attempt++) {
     const target = sample(WORLD_LOCATIONS)[0];
-    const answerType = Math.random() < 0.55 ? "city" : "country";
-    const needle = answerType === "city" ? target.city : target.country;
-
-    // Second API in the flow: validate the target and get canonical geography.
     const geo = await geocode(`${target.city}, ${target.country}`);
     if (!geo) continue;
 
     const url = new URL("https://newsapi.org/v2/everything");
-    url.searchParams.set("q", `"${needle}"`);
+    url.searchParams.set("q", `"${target.city}"`);
     url.searchParams.set("searchIn", "title,description");
     url.searchParams.set("language", "en");
     url.searchParams.set("sortBy", "publishedAt");
@@ -134,8 +130,7 @@ async function newsQuestion() {
     const data = await fetchJson(url, { headers: { "X-Api-Key": key } });
     const candidates = (data.articles || []).filter(a => {
       if (!a?.title || a.title === "[Removed]") return false;
-      const haystack = `${a.title} ${a.description || ""}`.toLowerCase();
-      return haystack.includes(needle.toLowerCase());
+      return a.title.toLowerCase().includes(target.city.toLowerCase());
     });
     if (!candidates.length) continue;
 
@@ -143,15 +138,14 @@ async function newsQuestion() {
     const redactionTerms = [target.city, target.country, geo.city, geo.country];
     const title = redactTerms(article.title, redactionTerms);
     const description = redactTerms(article.description || "", redactionTerms);
-    if (!title.includes("[location]") && !description.includes("[location]")) continue;
+    if (!title.includes("[location]")) continue;
 
-    const answer = answerType === "city" ? target.city : target.country;
-    const optionPool = answerType === "city" ? CITY_POOL : COUNTRY_POOL;
-    const wrong = sample(optionPool.filter(x => x !== answer), 3);
+    const answer = target.country;
+    const wrong = sample(COUNTRY_POOL.filter(x => x !== answer), 3);
     return {
       ready: true,
-      kind: answerType,
-      prompt: answerType === "city" ? "Which city is this story about?" : "Which country is this story about?",
+      kind: "country",
+      prompt: "Which country is this headline from?",
       title,
       description,
       source: article.source?.name || "News source",
@@ -163,7 +157,7 @@ async function newsQuestion() {
       geocoded: { lat: geo.lat, lon: geo.lon }
     };
   }
-  throw new Error("NewsAPI returned stories, but none had a clean location clue. Click New question to retry.");
+  throw new Error("NewsAPI returned stories, but none had a clean headline location clue. Try the next story.");
 }
 
 async function airportGeo(airport, iata) {
@@ -220,9 +214,10 @@ async function flightQuestion() {
       answer,
       options: sample([answer, ...wrong.slice(0, 3)], 4),
       live,
+      status: correct.flight_status || "active",
       route: {
-        departure: { lat: depGeo.lat, lon: depGeo.lon, iata: correct.departure.iata },
-        arrival: { lat: arrGeo.lat, lon: arrGeo.lon, iata: correct.arrival.iata }
+        departure: { lat: depGeo.lat, lon: depGeo.lon, iata: correct.departure.iata, airport: correct.departure.airport },
+        arrival: { lat: arrGeo.lat, lon: arrGeo.lon, iata: correct.arrival.iata, airport: correct.arrival.airport }
       },
       reveal: `${correct.departure.airport} (${correct.departure.iata}), ${depGeo.country} → ${correct.arrival.airport} (${correct.arrival.iata}), ${arrGeo.country}`
     };
