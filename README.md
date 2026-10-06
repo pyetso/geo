@@ -10,3 +10,9 @@ Players have 5 attempts. Each wrong guess stays in the same round and shows the 
 ### Flights
 The Flights game uses Aviationstack active-flight data and the same country autocomplete/guess interaction.
 When Aviationstack has live aircraft coordinates, the flight card displays altitude, speed, and an approximate position on the route. If live coordinates are missing, it still shows the active departure/arrival route.
+
+### Window
+Window uses Windy Webcams API v3 to show a current mystery webcam frame. Add `WINDY_API_KEY` to `.env` locally and to Vercel Environment Variables in production. Webcam imagery links back to Windy as required by the API terms.
+
+### Direction hints
+Distance and direction hints use capital coordinates when available (via REST Countries), rather than geographic country centroids. This makes directions for large countries such as Canada and the United States much more intuitive.

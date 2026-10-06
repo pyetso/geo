@@ -18,31 +18,52 @@ const radio = {
   view: $("radio-view"), audio: $("radio-player"), canvas: $("waveform"), state: $("audio-state"), play: $("play-pause"), restart: $("restart"),
   volumeToggle: $("volume-toggle"), volume: $("volume"), input: $("country-input"), suggestions: $("country-suggestions"), form: $("guess-form"),
   guessButton: $("guess-form").querySelector(".guess-button"), feedback: $("feedback"), next: $("next-after-answer"), actions: $("station-actions"),
-  board: $("previous-guesses"), rows: $("previous-guesses-list"), slots: $("guess-slots")
+  board: $("previous-guesses"), rows: $("previous-guesses-list"), slots: $("guess-slots"), beam: $("radio-interaction")
 };
 const flight = {
   view: $("flight-view"), from: $("flight-from"), to: $("flight-to"), number: $("flight-number"), airline: $("flight-airline"), altitude: $("flight-altitude"), speed: $("flight-speed"), marker: $("plane-marker"),
   path: $("flight-route-path"), depDot: $("flight-departure-dot"), arrDot: $("flight-arrival-dot"),
   question: $("flight-question"), input: $("flight-country-input"), suggestions: $("flight-country-suggestions"), form: $("flight-guess-form"), guessButton: $("flight-guess-form").querySelector(".guess-button"), feedback: $("flight-feedback"), actions: $("flight-actions"), next: $("next-flight"),
-  board: $("flight-previous-guesses"), rows: $("flight-previous-guesses-list"), slots: $("flight-guess-slots")
+  board: $("flight-previous-guesses"), rows: $("flight-previous-guesses-list"), slots: $("flight-guess-slots"), beam: $("flight-interaction")
 };
 const news = {
   view: $("news-view"), title: $("news-title"), description: $("news-description"), source: $("news-source"), date: $("news-date"),
   question: $("news-question"), input: $("news-country-input"), suggestions: $("news-country-suggestions"), form: $("news-guess-form"), guessButton: $("news-guess-form").querySelector(".guess-button"), feedback: $("news-feedback"), actions: $("news-actions"), next: $("next-news"),
-  board: $("news-previous-guesses"), rows: $("news-previous-guesses-list"), slots: $("news-guess-slots")
+  board: $("news-previous-guesses"), rows: $("news-previous-guesses-list"), slots: $("news-guess-slots"), beam: $("news-interaction")
+};
+const windowGame = {
+  view: $("window-view"), image: $("window-image"), sourceLink: $("window-source-link"), status: $("window-status"),
+  question: $("window-question"), input: $("window-country-input"), suggestions: $("window-country-suggestions"), form: $("window-guess-form"), guessButton: $("window-guess-form").querySelector(".guess-button"), feedback: $("window-feedback"), actions: $("window-actions"), next: $("next-window"),
+  board: $("window-previous-guesses"), rows: $("window-previous-guesses-list"), slots: $("window-guess-slots"), beam: $("window-interaction")
 };
 
-let currentRadio=null, radioTries=5, radioOver=false, radioLastDistance=null, radioHistory=[], streamRecovery=0;
+let currentRadio=null, radioTries=5, radioOver=false, radioLastDistance=null, radioHistory=[], streamRecovery=0, nextRadioPromise=null;
 let currentFlight=null, flightTries=5, flightOver=false, flightLastDistance=null, flightHistory=[];
 let currentNews=null, newsTries=5, newsOver=false, newsLastDistance=null, newsHistory=[];
+let currentWindow=null, windowTries=5, windowOver=false, windowLastDistance=null, windowHistory=[];
 let audioContext=null, analyser=null, sourceNode=null, raf=null, smoothBars=[], normalizedEnvelope=.12;
+let resultEffect=null, resultEffectTimer=null;
 
 function normalize(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[’']/g,"").replace(/[^a-zA-Z0-9]+/g," ").trim().toLowerCase()}
 const LOOKUP=new Map(COUNTRY_NAMES.map(n=>[normalize(n),n])); for(const [a,n] of ALIASES) LOOKUP.set(normalize(a),n);
 function levenshtein(a,b){a=normalize(a);b=normalize(b);const p=Array.from({length:b.length+1},(_,i)=>i);for(let i=1;i<=a.length;i++){let last=p[0];p[0]=i;for(let j=1;j<=b.length;j++){const old=p[j];p[j]=Math.min(p[j]+1,p[j-1]+1,last+(a[i-1]===b[j-1]?0:1));last=old}}return p[b.length]}
-function canonicalCountry(v){const k=normalize(v);if(!k)return null;if(LOOKUP.has(k))return LOOKUP.get(k);let best=null,d=Infinity;for(const [ck,n] of LOOKUP){const x=levenshtein(k,ck);if(x<d){d=x;best=n}}const limit=k.length<=5?1:k.length<=9?2:3;return d<=limit?best:null}
+function canonicalCountry(v){let k=normalize(v);if(!k)return null;k=k.replace(/^the\s+/,"");if(LOOKUP.has(k))return LOOKUP.get(k);let best=null,d=Infinity;for(const [ck,n] of LOOKUP){const x=levenshtein(k,ck);if(x<d){d=x;best=n}}const limit=k.length<=5?1:k.length<=9?2:3;return d<=limit?best:null}
 function comparable(v){return normalize(canonicalCountry(v)||v).replace(/^the /,"")}
-function escapeHtml(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function escapeHtml(v){return String(v??"").replace(/[&<>"\']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function flashBorderBeam(_el,result){
+  const duration=result==="correct"?5000:3000;
+  const cls=result==="correct"?"beam-correct":"beam-wrong";
+  if(resultEffectTimer)clearTimeout(resultEffectTimer);
+  document.body.classList.remove("beam-wrong","beam-correct");
+  void document.body.offsetWidth;
+  resultEffect=result;
+  document.body.classList.add(cls);
+  resultEffectTimer=setTimeout(()=>{
+    document.body.classList.remove("beam-wrong","beam-correct");
+    resultEffect=null;
+    resultEffectTimer=null;
+  },duration);
+}
 async function fetchJson(url){const r=await fetch(url,{cache:"no-store"});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||`${r.status} ${r.statusText}`);return b}
 function flagFor(country){const canonical=canonicalCountry(country)||country;const code=COUNTRY_CODE.get(normalize(canonical));return code?String.fromCodePoint(...code.split("").map(c=>127397+c.charCodeAt(0))):"🌐"}
 
@@ -61,11 +82,14 @@ function wireCombobox(input,suggestions){
 const closeRadioSuggestions=wireCombobox(radio.input,radio.suggestions);
 const closeFlightSuggestions=wireCombobox(flight.input,flight.suggestions);
 const closeNewsSuggestions=wireCombobox(news.input,news.suggestions);
+const closeWindowSuggestions=wireCombobox(windowGame.input,windowGame.suggestions);
 
 function haversine(a,b){const R=6371,toRad=x=>x*Math.PI/180,dLat=toRad(b.lat-a.lat),dLon=toRad(b.lon-a.lon),la1=toRad(a.lat),la2=toRad(b.lat);const x=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;return Math.round(2*R*Math.asin(Math.sqrt(x)))}
 function bearing(a,b){const toRad=x=>x*Math.PI/180,toDeg=x=>x*180/Math.PI,la1=toRad(a.lat),la2=toRad(b.lat),dl=toRad(b.lon-a.lon);let d=(toDeg(Math.atan2(Math.sin(dl)*Math.cos(la2),Math.cos(la1)*Math.sin(la2)-Math.sin(la1)*Math.cos(la2)*Math.cos(dl)))+360)%360;const dirs=["North","Northeast","East","Southeast","South","Southwest","West","Northwest"];return dirs[Math.round(d/45)%8]}
-async function distanceHint(guess,answer,lastDistance){
-  try{const [g,a]=await Promise.all([fetchJson(`/api/country-location?name=${encodeURIComponent(guess)}`),fetchJson(`/api/country-location?name=${encodeURIComponent(answer)}`)]);if(!g.ready||!a.ready)return null;const km=haversine(g,a),direction=bearing(g,a);const temperature=lastDistance==null?null:km<lastDistance?"warmer":km>lastDistance?"colder":"same";return {km,direction,temperature};}catch{return null}
+function countryCodeFor(country){const canonical=canonicalCountry(country)||country;return COUNTRY_CODE.get(normalize(canonical))||""}
+async function countryAnchor(country,explicitCode=""){const code=explicitCode||countryCodeFor(country);const params=new URLSearchParams({name:canonicalCountry(country)||country});if(code)params.set("code",code);return fetchJson(`/api/country-location?${params.toString()}`)}
+async function distanceHint(guess,answer,lastDistance,answerCode=""){
+  try{const [g,a]=await Promise.all([countryAnchor(guess),countryAnchor(answer,answerCode)]);if(!g.ready||!a.ready)return null;const km=haversine(g,a),direction=bearing(g,a);const temperature=lastDistance==null?null:km<lastDistance?"warmer":km>lastDistance?"colder":"same";return {km,direction,temperature};}catch{return null}
 }
 
 /* ---------------- Radio ---------------- */
@@ -97,34 +121,88 @@ function drawWave(){
     const neighbor=(raw[Math.max(0,i-1)]+raw[i]+raw[Math.min(count-1,i+1)])/3;const target=raw[i]*.72+neighbor*.28;const cur=smoothBars[i]??.018;const ease=target>cur?.27:.14;smoothBars[i]=cur+(target-cur)*ease;
   }
   ctx.lineWidth=Math.max(1.3*d,2);ctx.lineCap="round";ctx.shadowColor="rgba(98,174,240,.18)";ctx.shadowBlur=3*d;
-  for(let i=0;i<count;i++){const x=(i+.5)*spacing,half=Math.max(1.4*d,smoothBars[i]*h*.43),edge=Math.abs((i/(count-1))-.5)*2,alpha=.66+(1-edge)*.28;ctx.strokeStyle=`rgba(9,127,232,${alpha.toFixed(3)})`;ctx.beginPath();ctx.moveTo(x,mid-half);ctx.lineTo(x,mid+half);ctx.stroke()}
+  for(let i=0;i<count;i++){const x=(i+.5)*spacing,half=Math.max(1.4*d,smoothBars[i]*h*.43),edge=Math.abs((i/(count-1))-.5)*2,alpha=.66+(1-edge)*.28;const beamRgb=resultEffect==="correct"?[34,197,94]:resultEffect==="wrong"?[239,68,68]:[9,127,232];ctx.strokeStyle=`rgba(${beamRgb[0]},${beamRgb[1]},${beamRgb[2]},${alpha.toFixed(3)})`;ctx.beginPath();ctx.moveTo(x,mid-half);ctx.lineTo(x,mid+half);ctx.stroke()}
   ctx.shadowBlur=0;raf=requestAnimationFrame(drawWave);
 }
 async function tryPlay(user=false){try{if(user)await ensureAudioGraph();await radio.audio.play();if(user)await ensureAudioGraph();setPlaying(true);setState("Live audio playing");return true}catch{setPlaying(false);setState("Tap play to start audio");return false}}
 function renderRadioHistory(){
   radio.board.hidden=radioHistory.length===0;
-  radio.rows.innerHTML=radioHistory.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon()}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
+  radio.rows.innerHTML=radioHistory.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon(g.hint?.direction)}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
   const remaining=Math.max(0,5-radioHistory.length);radio.slots.innerHTML=remaining?`<div class="guess-slot"></div><div class="guess-slot"></div><div class="guess-slot"></div>`:"";
 }
 function renderGameHistory(ui,history){
   ui.board.hidden=history.length===0;
-  ui.rows.innerHTML=history.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon()}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
+  ui.rows.innerHTML=history.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon(g.hint?.direction)}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
   const remaining=Math.max(0,5-history.length);ui.slots.innerHTML=remaining?`<div class="guess-slot"></div><div class="guess-slot"></div><div class="guess-slot"></div>`:"";
 }
 function distanceIcon(){return `<svg viewBox="0 0 24 24"><path d="M5 5h4a3 3 0 0 1 0 6H7a3 3 0 0 0 0 6h12"/><circle cx="5" cy="5" r="1.5"/><circle cx="19" cy="17" r="1.5"/></svg>`}
-function compassIcon(){return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m15 9-2 5-5 2 2-5 5-2Z"/></svg>`}
-async function loadStation(){
-  streamRecovery=0;radioOver=true;currentRadio=null;radioTries=5;radioLastDistance=null;radioHistory=[];radio.input.value="";radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=false;radio.feedback.textContent="";radio.feedback.className="feedback";radio.actions.hidden=true;renderRadioHistory();setState("Finding a station…");closeRadioSuggestions();
-  try{const q=await fetchJson("/api/radio");if(!q.ready)throw new Error(q.error||"Radio unavailable");currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState("Starting live audio…");await tryPlay(false)}catch(e){setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message}
+function compassIcon(direction){
+  const angles={North:0,Northeast:45,East:90,Southeast:135,South:180,Southwest:225,West:270,Northwest:315};
+  const angle=angles[direction]??0;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4l3 8-3-1.5L9 12l3-8Z" transform="rotate(${angle} 12 12)"/></svg>`
+}
+async function fetchRadioQuestion(){
+  const q=await fetchJson("/api/radio");
+  if(!q.ready)throw new Error(q.error||"Radio unavailable");
+  return q;
+}
+function prefetchNextRadio(){
+  if(!nextRadioPromise){
+    nextRadioPromise=fetchRadioQuestion().catch(error=>{nextRadioPromise=null;throw error});
+  }
+  return nextRadioPromise;
+}
+async function loadStation(usePrefetch=false){
+  streamRecovery=0;radioOver=true;currentRadio=null;radioTries=5;radioLastDistance=null;radioHistory=[];radio.input.value="";radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=false;radio.feedback.textContent="";radio.feedback.className="feedback";radio.actions.hidden=true;renderRadioHistory();setState(usePrefetch&&nextRadioPromise?"Switching station…":"Finding a station…");closeRadioSuggestions();
+  try{
+    let q;
+    if(usePrefetch&&nextRadioPromise){const prefetched=nextRadioPromise;nextRadioPromise=null;q=await prefetched}else q=await fetchRadioQuestion();
+    currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState("Starting live audio…");
+    // Fetch the following round while the player is listening, so Next usually has no API wait.
+    prefetchNextRadio().catch(()=>{});
+    await tryPlay(false)
+  }catch(e){setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message}
 }
 async function checkRadioGuess(){
   if(!currentRadio||radioOver)return;const raw=radio.input.value.trim();if(!raw){radio.feedback.className="feedback wrong";radio.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){radio.feedback.className="feedback wrong";radio.feedback.textContent="Choose a country from the list, or check the spelling.";return}radio.input.value=corrected;closeRadioSuggestions();
   const correct=comparable(corrected)===comparable(currentRadio.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentRadio.answer,radioLastDistance);if(hint&&!correct)radioLastDistance=hint.km;radioHistory.push({country:corrected,hint,correct});renderRadioHistory();
-  if(correct){radioOver=true;radio.feedback.className="feedback correct";radio.feedback.innerHTML=`<strong>Correct.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
-  radioTries--;if(radioTries<=0){radioOver=true;radio.feedback.className="feedback wrong";radio.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
+  if(correct){flashBorderBeam(radio.beam,"correct");radioOver=true;radio.feedback.className="feedback correct";radio.feedback.innerHTML=`<strong>Correct.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
+  radioTries--;flashBorderBeam(radio.beam,"wrong");if(radioTries<=0){radioOver=true;radio.feedback.className="feedback wrong";radio.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentRadio.answer)}.`;finishRadioRound();return}
   radio.feedback.className="feedback wrong";radio.feedback.innerHTML=`<strong>Not quite.</strong> ${radioTries} ${radioTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;radio.input.value="";radio.input.focus();
 }
 function finishRadioRound(){radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=true;radio.actions.hidden=false}
+
+/* ---------------- Window ---------------- */
+function resetWindowVisual(){
+  const wrap=windowGame.sourceLink.querySelector(".window-image-wrap");
+  wrap?.classList.add("loading");
+  windowGame.image.removeAttribute("src");
+  windowGame.sourceLink.href="https://www.windy.com/webcams";
+  windowGame.status.textContent="Finding a window…";
+  windowGame.question.textContent="Finding a view somewhere in the world…";
+}
+function fillWindowVisual(q){
+  const wrap=windowGame.sourceLink.querySelector(".window-image-wrap");
+  windowGame.sourceLink.href=q.sourceUrl||"https://www.windy.com/webcams";
+  windowGame.image.alt="Current mystery webcam view";
+  windowGame.image.onload=()=>wrap?.classList.remove("loading");
+  windowGame.image.onerror=()=>{wrap?.classList.remove("loading");windowGame.status.textContent="IMAGE UNAVAILABLE"};
+  windowGame.image.src=q.image;
+  windowGame.status.textContent=q.liveAvailable?"LIVE CAMERA":"CURRENT FRAME";
+  windowGame.question.textContent=q.prompt||"Which country are you looking at?";
+}
+async function loadWindow(){
+  windowOver=true;currentWindow=null;windowTries=5;windowLastDistance=null;windowHistory=[];renderGameHistory(windowGame,windowHistory);windowGame.input.value="";windowGame.input.disabled=true;windowGame.guessButton.disabled=true;windowGame.form.hidden=false;windowGame.actions.hidden=true;windowGame.feedback.textContent="";windowGame.feedback.className="feedback";resetWindowVisual();closeWindowSuggestions();
+  try{const q=await fetchJson("/api/window");if(!q.ready)throw new Error(q.error||"Window unavailable");if(!q.image||!q.answer)throw new Error("Window data incomplete");currentWindow=q;windowOver=false;fillWindowVisual(q);windowGame.input.disabled=false;windowGame.guessButton.disabled=false}catch(e){windowGame.status.textContent="WINDOW UNAVAILABLE";windowGame.question.textContent="Could not open a webcam";windowGame.feedback.className="feedback wrong";windowGame.feedback.textContent=e.message}
+}
+async function checkWindowGuess(){
+  if(!currentWindow||windowOver)return;const raw=windowGame.input.value.trim();if(!raw){windowGame.feedback.className="feedback wrong";windowGame.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){windowGame.feedback.className="feedback wrong";windowGame.feedback.textContent="Choose a country from the list, or check the spelling.";return}windowGame.input.value=corrected;closeWindowSuggestions();
+  const guessCode=countryCodeFor(corrected),answerCode=String(currentWindow.countryCode||"").toUpperCase();const correct=(answerCode&&guessCode===answerCode)||comparable(corrected)===comparable(currentWindow.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentWindow.answer,windowLastDistance,answerCode);if(hint&&!correct)windowLastDistance=hint.km;windowHistory.push({country:corrected,hint,correct});renderGameHistory(windowGame,windowHistory);
+  if(correct){flashBorderBeam(windowGame.beam,"correct");windowOver=true;windowGame.feedback.className="feedback correct";windowGame.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentWindow.reveal||currentWindow.answer)}.`;finishWindowRound();return}
+  windowTries--;flashBorderBeam(windowGame.beam,"wrong");if(windowTries<=0){windowOver=true;windowGame.feedback.className="feedback wrong";windowGame.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentWindow.answer)}${currentWindow.reveal?` — ${escapeHtml(currentWindow.reveal)}`:""}.`;finishWindowRound();return}
+  windowGame.feedback.className="feedback wrong";windowGame.feedback.innerHTML=`<strong>Not quite.</strong> ${windowTries} ${windowTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;windowGame.input.value="";windowGame.input.focus();
+}
+function finishWindowRound(){windowGame.input.disabled=true;windowGame.guessButton.disabled=true;windowGame.form.hidden=true;windowGame.actions.hidden=false}
 
 /* ---------------- Flights ---------------- */
 function resetFlightVisual(){flight.from.textContent="---";flight.to.textContent="---";flight.number.textContent="—";flight.airline.textContent="—";flight.altitude.textContent="—";flight.speed.textContent="—";flight.path.setAttribute("d","M60 150 Q340 40 620 150");flight.marker.setAttribute("transform","translate(340 80)");flight.question.textContent="Finding an active flight…"}
@@ -142,8 +220,8 @@ async function loadFlight(){
 async function checkFlightGuess(){
   if(!currentFlight||flightOver)return;const raw=flight.input.value.trim();if(!raw){flight.feedback.className="feedback wrong";flight.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){flight.feedback.className="feedback wrong";flight.feedback.textContent="Choose a country from the list, or check the spelling.";return}flight.input.value=corrected;closeFlightSuggestions();
   const correct=comparable(corrected)===comparable(currentFlight.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentFlight.answer,flightLastDistance);if(hint&&!correct)flightLastDistance=hint.km;flightHistory.push({country:corrected,hint,correct});renderGameHistory(flight,flightHistory);
-  if(correct){flightOver=true;flight.feedback.className="feedback correct";flight.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentFlight.reveal||currentFlight.answer)}`;finishFlightRound();return}
-  flightTries--;if(flightTries<=0){flightOver=true;flight.feedback.className="feedback wrong";flight.feedback.innerHTML=`<strong>Round over.</strong> ${escapeHtml(currentFlight.reveal||`The answer was ${currentFlight.answer}.`)}`;finishFlightRound();return}
+  if(correct){flashBorderBeam(flight.beam,"correct");flightOver=true;flight.feedback.className="feedback correct";flight.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentFlight.reveal||currentFlight.answer)}`;finishFlightRound();return}
+  flightTries--;flashBorderBeam(flight.beam,"wrong");if(flightTries<=0){flightOver=true;flight.feedback.className="feedback wrong";flight.feedback.innerHTML=`<strong>Round over.</strong> ${escapeHtml(currentFlight.reveal||`The answer was ${currentFlight.answer}.`)}`;finishFlightRound();return}
   flight.feedback.className="feedback wrong";flight.feedback.innerHTML=`<strong>Not quite.</strong> ${flightTries} ${flightTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;flight.input.value="";flight.input.focus();
 }
 function finishFlightRound(){flight.input.disabled=true;flight.guessButton.disabled=true;flight.form.hidden=true;flight.actions.hidden=false}
@@ -156,8 +234,8 @@ async function loadNews(){newsOver=true;currentNews=null;newsTries=5;newsLastDis
 async function checkNewsGuess(){
   if(!currentNews||newsOver)return;const raw=news.input.value.trim();if(!raw){news.feedback.className="feedback wrong";news.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){news.feedback.className="feedback wrong";news.feedback.textContent="Choose a country from the list, or check the spelling.";return}news.input.value=corrected;closeNewsSuggestions();
   const correct=comparable(corrected)===comparable(currentNews.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentNews.answer,newsLastDistance);if(hint&&!correct)newsLastDistance=hint.km;newsHistory.push({country:corrected,hint,correct});renderGameHistory(news,newsHistory);
-  if(correct){newsOver=true;news.feedback.className="feedback correct";news.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentNews.reveal||currentNews.answer)}`;finishNewsRound();return}
-  newsTries--;if(newsTries<=0){newsOver=true;news.feedback.className="feedback wrong";news.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentNews.answer)}.`;finishNewsRound();return}
+  if(correct){flashBorderBeam(news.beam,"correct");newsOver=true;news.feedback.className="feedback correct";news.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentNews.reveal||currentNews.answer)}`;finishNewsRound();return}
+  newsTries--;flashBorderBeam(news.beam,"wrong");if(newsTries<=0){newsOver=true;news.feedback.className="feedback wrong";news.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentNews.answer)}.`;finishNewsRound();return}
   news.feedback.className="feedback wrong";news.feedback.innerHTML=`<strong>Not quite.</strong> ${newsTries} ${newsTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;news.input.value="";news.input.focus();
 }
 function finishNewsRound(){news.input.disabled=true;news.guessButton.disabled=true;news.form.hidden=true;news.actions.hidden=false}
@@ -166,13 +244,13 @@ function finishNewsRound(){news.input.disabled=true;news.guessButton.disabled=tr
 function switchGame(target){
   document.querySelectorAll(".game-view").forEach(v=>{const on=v.dataset.game===target;v.hidden=!on;v.classList.toggle("active",on)});document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.classList.toggle("active",b.dataset.target===target));
   if(target!=="radio"&&!radio.audio.paused){radio.audio.pause();setPlaying(false);setState("Paused")}
-  if(target==="flight"&&!currentFlight)loadFlight();else if(target==="news"&&!currentNews)loadNews();else if(target==="radio"&&currentRadio&&!radioOver)setState(radio.audio.paused?"Tap play to start audio":"Live audio playing");
+  if(target==="window"&&!currentWindow)loadWindow();else if(target==="flight"&&!currentFlight)loadFlight();else if(target==="news"&&!currentNews)loadNews();else if(target==="radio"&&currentRadio&&!radioOver)setState(radio.audio.paused?"Tap play to start audio":"Live audio playing");
 }
 document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.addEventListener("click",()=>switchGame(b.dataset.target)));
 radio.play.addEventListener("click",async()=>{await ensureAudioGraph();if(radio.audio.paused)await tryPlay(true);else{radio.audio.pause();setPlaying(false);setState("Paused")}});
 radio.restart.addEventListener("click",async()=>{if(!currentRadio)return;await ensureAudioGraph();radio.audio.pause();radio.audio.src=currentRadio.stream;radio.audio.load();setState("Restarting stream…");await tryPlay(true)});
 radio.volumeToggle.addEventListener("click",()=>radio.volumeToggle.closest(".volume-control").classList.toggle("open"));radio.volume.addEventListener("input",()=>radio.audio.volume=Number(radio.volume.value));
-radio.audio.addEventListener("play",()=>setPlaying(true));radio.audio.addEventListener("pause",()=>setPlaying(false));radio.audio.addEventListener("waiting",()=>setState("Buffering…"));radio.audio.addEventListener("playing",()=>setState("Live audio playing"));radio.audio.addEventListener("error",()=>{setPlaying(false);if(currentRadio&&!radioOver&&streamRecovery<2){streamRecovery++;setState("Station dropped — finding another…");setTimeout(loadStation,450);return}setState("Stream unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent="This station stopped responding. Press Next to try another station.";radio.form.hidden=true;radio.actions.hidden=false});
+radio.audio.addEventListener("play",()=>setPlaying(true));radio.audio.addEventListener("pause",()=>setPlaying(false));radio.audio.addEventListener("waiting",()=>setState("Buffering…"));radio.audio.addEventListener("playing",()=>setState("Live audio playing"));radio.audio.addEventListener("error",()=>{setPlaying(false);if(currentRadio&&!radioOver&&streamRecovery<2){streamRecovery++;setState("Station dropped — finding another…");setTimeout(()=>loadStation(false),450);return}setState("Stream unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent="This station stopped responding. Press Next to try another station.";radio.form.hidden=true;radio.actions.hidden=false});
 function unlock(){ensureAudioGraph().then(ok=>{if(ok&&radio.audio.paused&&!radio.view.hidden)tryPlay(true)}).catch(()=>{});document.removeEventListener("pointerdown",unlock,true);document.removeEventListener("keydown",unlock,true)}document.addEventListener("pointerdown",unlock,true);document.addEventListener("keydown",unlock,true);
-radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",loadStation);flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",loadNews);window.addEventListener("resize",resizeCanvas);
-if(!raf)drawWave();loadStation();
+radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",()=>loadStation(true));windowGame.form.addEventListener("submit",e=>{e.preventDefault();checkWindowGuess()});windowGame.next.addEventListener("click",loadWindow);flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",loadNews);window.addEventListener("resize",resizeCanvas);
+if(!raf)drawWave();loadStation(false);

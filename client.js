@@ -31,10 +31,16 @@ const news = {
   question: $("news-question"), input: $("news-country-input"), suggestions: $("news-country-suggestions"), form: $("news-guess-form"), guessButton: $("news-guess-form").querySelector(".guess-button"), feedback: $("news-feedback"), actions: $("news-actions"), next: $("next-news"),
   board: $("news-previous-guesses"), rows: $("news-previous-guesses-list"), slots: $("news-guess-slots"), beam: $("news-interaction")
 };
+const windowGame = {
+  view: $("window-view"), image: $("window-image"), sourceLink: $("window-source-link"), status: $("window-status"),
+  question: $("window-question"), input: $("window-country-input"), suggestions: $("window-country-suggestions"), form: $("window-guess-form"), guessButton: $("window-guess-form").querySelector(".guess-button"), feedback: $("window-feedback"), actions: $("window-actions"), next: $("next-window"),
+  board: $("window-previous-guesses"), rows: $("window-previous-guesses-list"), slots: $("window-guess-slots"), beam: $("window-interaction")
+};
 
 let currentRadio=null, radioTries=5, radioOver=false, radioLastDistance=null, radioHistory=[], streamRecovery=0, nextRadioPromise=null;
 let currentFlight=null, flightTries=5, flightOver=false, flightLastDistance=null, flightHistory=[];
 let currentNews=null, newsTries=5, newsOver=false, newsLastDistance=null, newsHistory=[];
+let currentWindow=null, windowTries=5, windowOver=false, windowLastDistance=null, windowHistory=[];
 let audioContext=null, analyser=null, sourceNode=null, raf=null, smoothBars=[], normalizedEnvelope=.12;
 let resultEffect=null, resultEffectTimer=null;
 
@@ -76,11 +82,14 @@ function wireCombobox(input,suggestions){
 const closeRadioSuggestions=wireCombobox(radio.input,radio.suggestions);
 const closeFlightSuggestions=wireCombobox(flight.input,flight.suggestions);
 const closeNewsSuggestions=wireCombobox(news.input,news.suggestions);
+const closeWindowSuggestions=wireCombobox(windowGame.input,windowGame.suggestions);
 
 function haversine(a,b){const R=6371,toRad=x=>x*Math.PI/180,dLat=toRad(b.lat-a.lat),dLon=toRad(b.lon-a.lon),la1=toRad(a.lat),la2=toRad(b.lat);const x=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;return Math.round(2*R*Math.asin(Math.sqrt(x)))}
 function bearing(a,b){const toRad=x=>x*Math.PI/180,toDeg=x=>x*180/Math.PI,la1=toRad(a.lat),la2=toRad(b.lat),dl=toRad(b.lon-a.lon);let d=(toDeg(Math.atan2(Math.sin(dl)*Math.cos(la2),Math.cos(la1)*Math.sin(la2)-Math.sin(la1)*Math.cos(la2)*Math.cos(dl)))+360)%360;const dirs=["North","Northeast","East","Southeast","South","Southwest","West","Northwest"];return dirs[Math.round(d/45)%8]}
-async function distanceHint(guess,answer,lastDistance){
-  try{const [g,a]=await Promise.all([fetchJson(`/api/country-location?name=${encodeURIComponent(guess)}`),fetchJson(`/api/country-location?name=${encodeURIComponent(answer)}`)]);if(!g.ready||!a.ready)return null;const km=haversine(g,a),direction=bearing(g,a);const temperature=lastDistance==null?null:km<lastDistance?"warmer":km>lastDistance?"colder":"same";return {km,direction,temperature};}catch{return null}
+function countryCodeFor(country){const canonical=canonicalCountry(country)||country;return COUNTRY_CODE.get(normalize(canonical))||""}
+async function countryAnchor(country,explicitCode=""){const code=explicitCode||countryCodeFor(country);const params=new URLSearchParams({name:canonicalCountry(country)||country});if(code)params.set("code",code);return fetchJson(`/api/country-location?${params.toString()}`)}
+async function distanceHint(guess,answer,lastDistance,answerCode=""){
+  try{const [g,a]=await Promise.all([countryAnchor(guess),countryAnchor(answer,answerCode)]);if(!g.ready||!a.ready)return null;const km=haversine(g,a),direction=bearing(g,a);const temperature=lastDistance==null?null:km<lastDistance?"warmer":km>lastDistance?"colder":"same";return {km,direction,temperature};}catch{return null}
 }
 
 /* ---------------- Radio ---------------- */
@@ -163,6 +172,38 @@ async function checkRadioGuess(){
 }
 function finishRadioRound(){radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=true;radio.actions.hidden=false}
 
+/* ---------------- Window ---------------- */
+function resetWindowVisual(){
+  const wrap=windowGame.sourceLink.querySelector(".window-image-wrap");
+  wrap?.classList.add("loading");
+  windowGame.image.removeAttribute("src");
+  windowGame.sourceLink.href="https://www.windy.com/webcams";
+  windowGame.status.textContent="Finding a window…";
+  windowGame.question.textContent="Finding a view somewhere in the world…";
+}
+function fillWindowVisual(q){
+  const wrap=windowGame.sourceLink.querySelector(".window-image-wrap");
+  windowGame.sourceLink.href=q.sourceUrl||"https://www.windy.com/webcams";
+  windowGame.image.alt="Current mystery webcam view";
+  windowGame.image.onload=()=>wrap?.classList.remove("loading");
+  windowGame.image.onerror=()=>{wrap?.classList.remove("loading");windowGame.status.textContent="IMAGE UNAVAILABLE"};
+  windowGame.image.src=q.image;
+  windowGame.status.textContent=q.liveAvailable?"LIVE CAMERA":"CURRENT FRAME";
+  windowGame.question.textContent=q.prompt||"Which country are you looking at?";
+}
+async function loadWindow(){
+  windowOver=true;currentWindow=null;windowTries=5;windowLastDistance=null;windowHistory=[];renderGameHistory(windowGame,windowHistory);windowGame.input.value="";windowGame.input.disabled=true;windowGame.guessButton.disabled=true;windowGame.form.hidden=false;windowGame.actions.hidden=true;windowGame.feedback.textContent="";windowGame.feedback.className="feedback";resetWindowVisual();closeWindowSuggestions();
+  try{const q=await fetchJson("/api/window");if(!q.ready)throw new Error(q.error||"Window unavailable");if(!q.image||!q.answer)throw new Error("Window data incomplete");currentWindow=q;windowOver=false;fillWindowVisual(q);windowGame.input.disabled=false;windowGame.guessButton.disabled=false}catch(e){windowGame.status.textContent="WINDOW UNAVAILABLE";windowGame.question.textContent="Could not open a webcam";windowGame.feedback.className="feedback wrong";windowGame.feedback.textContent=e.message}
+}
+async function checkWindowGuess(){
+  if(!currentWindow||windowOver)return;const raw=windowGame.input.value.trim();if(!raw){windowGame.feedback.className="feedback wrong";windowGame.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){windowGame.feedback.className="feedback wrong";windowGame.feedback.textContent="Choose a country from the list, or check the spelling.";return}windowGame.input.value=corrected;closeWindowSuggestions();
+  const guessCode=countryCodeFor(corrected),answerCode=String(currentWindow.countryCode||"").toUpperCase();const correct=(answerCode&&guessCode===answerCode)||comparable(corrected)===comparable(currentWindow.answer);let hint=correct?{km:0,direction:"Correct",temperature:null}:await distanceHint(corrected,currentWindow.answer,windowLastDistance,answerCode);if(hint&&!correct)windowLastDistance=hint.km;windowHistory.push({country:corrected,hint,correct});renderGameHistory(windowGame,windowHistory);
+  if(correct){flashBorderBeam(windowGame.beam,"correct");windowOver=true;windowGame.feedback.className="feedback correct";windowGame.feedback.innerHTML=`<strong>Correct.</strong> ${escapeHtml(currentWindow.reveal||currentWindow.answer)}.`;finishWindowRound();return}
+  windowTries--;flashBorderBeam(windowGame.beam,"wrong");if(windowTries<=0){windowOver=true;windowGame.feedback.className="feedback wrong";windowGame.feedback.innerHTML=`<strong>Round over.</strong> The country was ${escapeHtml(currentWindow.answer)}${currentWindow.reveal?` — ${escapeHtml(currentWindow.reveal)}`:""}.`;finishWindowRound();return}
+  windowGame.feedback.className="feedback wrong";windowGame.feedback.innerHTML=`<strong>Not quite.</strong> ${windowTries} ${windowTries===1?"try":"tries"} left.${hint?`<span class="hint-line">${hint.km.toLocaleString()} km away · head ${escapeHtml(hint.direction.toLowerCase())}${hint.temperature?` · ${hint.temperature}`:""}.</span>`:""}`;windowGame.input.value="";windowGame.input.focus();
+}
+function finishWindowRound(){windowGame.input.disabled=true;windowGame.guessButton.disabled=true;windowGame.form.hidden=true;windowGame.actions.hidden=false}
+
 /* ---------------- Flights ---------------- */
 function resetFlightVisual(){flight.from.textContent="---";flight.to.textContent="---";flight.number.textContent="—";flight.airline.textContent="—";flight.altitude.textContent="—";flight.speed.textContent="—";flight.path.setAttribute("d","M60 150 Q340 40 620 150");flight.marker.setAttribute("transform","translate(340 80)");flight.question.textContent="Finding an active flight…"}
 function toVec(lat,lon){const p=lat*Math.PI/180,l=lon*Math.PI/180;return [Math.cos(p)*Math.cos(l),Math.cos(p)*Math.sin(l),Math.sin(p)]}
@@ -203,7 +244,7 @@ function finishNewsRound(){news.input.disabled=true;news.guessButton.disabled=tr
 function switchGame(target){
   document.querySelectorAll(".game-view").forEach(v=>{const on=v.dataset.game===target;v.hidden=!on;v.classList.toggle("active",on)});document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.classList.toggle("active",b.dataset.target===target));
   if(target!=="radio"&&!radio.audio.paused){radio.audio.pause();setPlaying(false);setState("Paused")}
-  if(target==="flight"&&!currentFlight)loadFlight();else if(target==="news"&&!currentNews)loadNews();else if(target==="radio"&&currentRadio&&!radioOver)setState(radio.audio.paused?"Tap play to start audio":"Live audio playing");
+  if(target==="window"&&!currentWindow)loadWindow();else if(target==="flight"&&!currentFlight)loadFlight();else if(target==="news"&&!currentNews)loadNews();else if(target==="radio"&&currentRadio&&!radioOver)setState(radio.audio.paused?"Tap play to start audio":"Live audio playing");
 }
 document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.addEventListener("click",()=>switchGame(b.dataset.target)));
 radio.play.addEventListener("click",async()=>{await ensureAudioGraph();if(radio.audio.paused)await tryPlay(true);else{radio.audio.pause();setPlaying(false);setState("Paused")}});
@@ -211,5 +252,5 @@ radio.restart.addEventListener("click",async()=>{if(!currentRadio)return;await e
 radio.volumeToggle.addEventListener("click",()=>radio.volumeToggle.closest(".volume-control").classList.toggle("open"));radio.volume.addEventListener("input",()=>radio.audio.volume=Number(radio.volume.value));
 radio.audio.addEventListener("play",()=>setPlaying(true));radio.audio.addEventListener("pause",()=>setPlaying(false));radio.audio.addEventListener("waiting",()=>setState("Buffering…"));radio.audio.addEventListener("playing",()=>setState("Live audio playing"));radio.audio.addEventListener("error",()=>{setPlaying(false);if(currentRadio&&!radioOver&&streamRecovery<2){streamRecovery++;setState("Station dropped — finding another…");setTimeout(()=>loadStation(false),450);return}setState("Stream unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent="This station stopped responding. Press Next to try another station.";radio.form.hidden=true;radio.actions.hidden=false});
 function unlock(){ensureAudioGraph().then(ok=>{if(ok&&radio.audio.paused&&!radio.view.hidden)tryPlay(true)}).catch(()=>{});document.removeEventListener("pointerdown",unlock,true);document.removeEventListener("keydown",unlock,true)}document.addEventListener("pointerdown",unlock,true);document.addEventListener("keydown",unlock,true);
-radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",()=>loadStation(true));flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",loadNews);window.addEventListener("resize",resizeCanvas);
+radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",()=>loadStation(true));windowGame.form.addEventListener("submit",e=>{e.preventDefault();checkWindowGuess()});windowGame.next.addEventListener("click",loadWindow);flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",loadNews);window.addEventListener("resize",resizeCanvas);
 if(!raf)drawWave();loadStation(false);

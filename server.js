@@ -382,26 +382,107 @@ async function proxyRadioStream(req, res, url) {
   }
 }
 
-async function countryLocation(name) {
+const countryAnchorCache = new Map();
+
+async function countryLocation(name, code) {
   const query = String(name || "").trim();
-  if (!query || query.length > 100) return { ready: false, error: "Invalid country." };
-  const geo = await geocode(query);
+  const alpha2 = String(code || "").trim().toUpperCase();
+  const cacheKey = alpha2 || query.toLowerCase();
+  if ((!query && !/^[A-Z]{2}$/.test(alpha2)) || query.length > 100) return { ready: false, error: "Invalid country." };
+  if (countryAnchorCache.has(cacheKey)) return countryAnchorCache.get(cacheKey);
+
+  // Capital-to-capital hints are much more intuitive than geographic centroids for
+  // very large countries such as Canada, the United States and Russia.
+  if (/^[A-Z]{2}$/.test(alpha2)) {
+    try {
+      const url = new URL(`https://restcountries.com/v3.1/alpha/${encodeURIComponent(alpha2)}`);
+      url.searchParams.set("fields", "name,cca2,capital,capitalInfo");
+      const data = await fetchJson(url, { headers: { "User-Agent": "GeoHub/1.2" } });
+      const latlng = data?.capitalInfo?.latlng;
+      if (Array.isArray(latlng) && latlng.length >= 2 && Number.isFinite(Number(latlng[0])) && Number.isFinite(Number(latlng[1]))) {
+        const result = {
+          ready: true, lat: Number(latlng[0]), lon: Number(latlng[1]),
+          country: data?.name?.common || query || alpha2, capital: data?.capital?.[0] || null, anchor: "capital"
+        };
+        countryAnchorCache.set(cacheKey, result);
+        return result;
+      }
+    } catch (error) {
+      console.warn(`Capital lookup failed for ${alpha2}:`, error.message);
+    }
+  }
+
+  const geo = await geocode(query || alpha2);
   if (!geo || !Number.isFinite(Number(geo.lat)) || !Number.isFinite(Number(geo.lon))) return { ready: false, error: "Country location unavailable." };
-  return { ready: true, lat: Number(geo.lat), lon: Number(geo.lon), country: geo.country || query };
+  const result = { ready: true, lat: Number(geo.lat), lon: Number(geo.lon), country: geo.country || query || alpha2, anchor: "fallback" };
+  countryAnchorCache.set(cacheKey, result);
+  return result;
+}
+
+function pickWindyImage(webcam) {
+  const current = webcam?.images?.current || {};
+  for (const key of ["preview", "thumbnail", "small", "icon"]) {
+    if (typeof current[key] === "string" && /^https:\/\//i.test(current[key])) return current[key];
+  }
+  return Object.values(current).find(v => typeof v === "string" && /^https:\/\//i.test(v)) || null;
+}
+
+async function windowQuestion() {
+  const key = process.env.WINDY_API_KEY;
+  if (!key) return { ready: false, error: "Add WINDY_API_KEY to .env and Vercel Environment Variables" };
+
+  // Windy v3 removed random sorting. The free tier allows offsets up to 1000,
+  // so sample a random page within that window and then pick a usable camera.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const url = new URL("https://api.windy.com/webcams/api/v3/webcams");
+    url.searchParams.set("limit", "50");
+    url.searchParams.set("offset", String(Math.floor(Math.random() * 951)));
+    url.searchParams.set("include", "images,location,player,urls");
+    url.searchParams.set("lang", "en");
+    const data = await fetchJson(url, { headers: { "X-WINDY-API-KEY": key, "User-Agent": "GeoHub/1.2" } });
+    const usable = (data?.webcams || []).filter(cam => {
+      const loc = cam?.location;
+      return cam?.status === "active" && pickWindyImage(cam) && loc?.country && /^[A-Z]{2}$/i.test(String(loc?.country_code || "")) &&
+        Number.isFinite(Number(loc?.latitude)) && Number.isFinite(Number(loc?.longitude)) && cam?.urls?.detail;
+    });
+    if (!usable.length) continue;
+
+    // Prefer cameras with a true live player when available, but keep current-image
+    // cameras as a fallback so the game stays reliable.
+    const live = usable.filter(cam => cam?.player?.live);
+    const cam = sample(live.length ? live : usable)[0];
+    const loc = cam.location;
+    const image = pickWindyImage(cam);
+    return {
+      ready: true,
+      kind: "window",
+      prompt: "Which country are you looking at?",
+      answer: loc.country,
+      countryCode: String(loc.country_code || "").toUpperCase(),
+      image,
+      sourceUrl: cam.urls.detail,
+      liveAvailable: Boolean(cam?.player?.live),
+      updatedAt: cam.lastUpdatedOn || null,
+      reveal: [loc.city, loc.region, loc.country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", "),
+      coordinates: { lat: Number(loc.latitude), lon: Number(loc.longitude) }
+    };
+  }
+  throw new Error("Windy did not return a usable webcam. Try the next window.");
 }
 
 
 async function apiRoute(req, res, pathname) {
   try {
     if (pathname === "/api/status") return json(res, 200, {
-      news: Boolean(process.env.NEWS_API_KEY), flights: Boolean(process.env.AVIATIONSTACK_API_KEY), radio: true
+      news: Boolean(process.env.NEWS_API_KEY), flights: Boolean(process.env.AVIATIONSTACK_API_KEY), radio: true, window: Boolean(process.env.WINDY_API_KEY)
     });
     if (pathname === "/api/news") return json(res, 200, await newsQuestion());
     if (pathname === "/api/flights") return json(res, 200, await flightQuestion());
     if (pathname === "/api/radio") return json(res, 200, await radioQuestion());
+    if (pathname === "/api/window") return json(res, 200, await windowQuestion());
     if (pathname === "/api/country-location") {
       const u = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-      return json(res, 200, await countryLocation(u.searchParams.get("name")));
+      return json(res, 200, await countryLocation(u.searchParams.get("name"), u.searchParams.get("code")));
     }
     return json(res, 404, { error: "Unknown API route" });
   } catch (error) {
@@ -434,6 +515,7 @@ if (require.main === module) {
     console.log(`News API: ${process.env.NEWS_API_KEY ? "configured" : "missing"}`);
     console.log(`Flights API: ${process.env.AVIATIONSTACK_API_KEY ? "configured" : "missing"}`);
     console.log("Radio: Radio Browser primary, Radio Garden fallback");
+    console.log(`Window: ${process.env.WINDY_API_KEY ? "Windy configured" : "Windy key missing"}`);
 
     if (process.argv.includes("--open") && process.platform === "win32") {
       try {
@@ -451,5 +533,6 @@ module.exports = {
   flightQuestion,
   newsQuestion,
   radioQuestion,
+  windowQuestion,
   countryLocation,
 };
