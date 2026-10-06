@@ -32,7 +32,7 @@ const news = {
   board: $("news-previous-guesses"), rows: $("news-previous-guesses-list"), slots: $("news-guess-slots"), beam: $("news-interaction")
 };
 
-let currentRadio=null, radioTries=5, radioOver=false, radioLastDistance=null, radioHistory=[], streamRecovery=0;
+let currentRadio=null, radioTries=5, radioOver=false, radioLastDistance=null, radioHistory=[], streamRecovery=0, nextRadioPromise=null;
 let currentFlight=null, flightTries=5, flightOver=false, flightLastDistance=null, flightHistory=[];
 let currentNews=null, newsTries=5, newsOver=false, newsLastDistance=null, newsHistory=[];
 let audioContext=null, analyser=null, sourceNode=null, raf=null, smoothBars=[], normalizedEnvelope=.12;
@@ -118,19 +118,41 @@ function drawWave(){
 async function tryPlay(user=false){try{if(user)await ensureAudioGraph();await radio.audio.play();if(user)await ensureAudioGraph();setPlaying(true);setState("Live audio playing");return true}catch{setPlaying(false);setState("Tap play to start audio");return false}}
 function renderRadioHistory(){
   radio.board.hidden=radioHistory.length===0;
-  radio.rows.innerHTML=radioHistory.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon()}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
+  radio.rows.innerHTML=radioHistory.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon(g.hint?.direction)}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
   const remaining=Math.max(0,5-radioHistory.length);radio.slots.innerHTML=remaining?`<div class="guess-slot"></div><div class="guess-slot"></div><div class="guess-slot"></div>`:"";
 }
 function renderGameHistory(ui,history){
   ui.board.hidden=history.length===0;
-  ui.rows.innerHTML=history.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon()}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
+  ui.rows.innerHTML=history.map(g=>`<div class="guess-row"><div class="guess-pill guess-country"><span class="guess-flag">${flagFor(g.country)}</span><span>${escapeHtml(g.country)}</span></div><div class="guess-pill"><span class="guess-icon">${distanceIcon()}</span><span>${g.hint?`${g.hint.km.toLocaleString()} km`:"—"}</span></div><div class="guess-pill"><span class="guess-icon">${compassIcon(g.hint?.direction)}</span><span>${g.hint?escapeHtml(g.hint.direction):"—"}</span></div></div>`).join("");
   const remaining=Math.max(0,5-history.length);ui.slots.innerHTML=remaining?`<div class="guess-slot"></div><div class="guess-slot"></div><div class="guess-slot"></div>`:"";
 }
 function distanceIcon(){return `<svg viewBox="0 0 24 24"><path d="M5 5h4a3 3 0 0 1 0 6H7a3 3 0 0 0 0 6h12"/><circle cx="5" cy="5" r="1.5"/><circle cx="19" cy="17" r="1.5"/></svg>`}
-function compassIcon(){return `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m15 9-2 5-5 2 2-5 5-2Z"/></svg>`}
-async function loadStation(){
-  streamRecovery=0;radioOver=true;currentRadio=null;radioTries=5;radioLastDistance=null;radioHistory=[];radio.input.value="";radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=false;radio.feedback.textContent="";radio.feedback.className="feedback";radio.actions.hidden=true;renderRadioHistory();setState("Finding a station…");closeRadioSuggestions();
-  try{const q=await fetchJson("/api/radio");if(!q.ready)throw new Error(q.error||"Radio unavailable");currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState("Starting live audio…");await tryPlay(false)}catch(e){setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message}
+function compassIcon(direction){
+  const angles={North:0,Northeast:45,East:90,Southeast:135,South:180,Southwest:225,West:270,Northwest:315};
+  const angle=angles[direction]??0;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4l3 8-3-1.5L9 12l3-8Z" transform="rotate(${angle} 12 12)"/></svg>`
+}
+async function fetchRadioQuestion(){
+  const q=await fetchJson("/api/radio");
+  if(!q.ready)throw new Error(q.error||"Radio unavailable");
+  return q;
+}
+function prefetchNextRadio(){
+  if(!nextRadioPromise){
+    nextRadioPromise=fetchRadioQuestion().catch(error=>{nextRadioPromise=null;throw error});
+  }
+  return nextRadioPromise;
+}
+async function loadStation(usePrefetch=false){
+  streamRecovery=0;radioOver=true;currentRadio=null;radioTries=5;radioLastDistance=null;radioHistory=[];radio.input.value="";radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=false;radio.feedback.textContent="";radio.feedback.className="feedback";radio.actions.hidden=true;renderRadioHistory();setState(usePrefetch&&nextRadioPromise?"Switching station…":"Finding a station…");closeRadioSuggestions();
+  try{
+    let q;
+    if(usePrefetch&&nextRadioPromise){const prefetched=nextRadioPromise;nextRadioPromise=null;q=await prefetched}else q=await fetchRadioQuestion();
+    currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState("Starting live audio…");
+    // Fetch the following round while the player is listening, so Next usually has no API wait.
+    prefetchNextRadio().catch(()=>{});
+    await tryPlay(false)
+  }catch(e){setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message}
 }
 async function checkRadioGuess(){
   if(!currentRadio||radioOver)return;const raw=radio.input.value.trim();if(!raw){radio.feedback.className="feedback wrong";radio.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){radio.feedback.className="feedback wrong";radio.feedback.textContent="Choose a country from the list, or check the spelling.";return}radio.input.value=corrected;closeRadioSuggestions();
@@ -187,7 +209,7 @@ document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.addEvent
 radio.play.addEventListener("click",async()=>{await ensureAudioGraph();if(radio.audio.paused)await tryPlay(true);else{radio.audio.pause();setPlaying(false);setState("Paused")}});
 radio.restart.addEventListener("click",async()=>{if(!currentRadio)return;await ensureAudioGraph();radio.audio.pause();radio.audio.src=currentRadio.stream;radio.audio.load();setState("Restarting stream…");await tryPlay(true)});
 radio.volumeToggle.addEventListener("click",()=>radio.volumeToggle.closest(".volume-control").classList.toggle("open"));radio.volume.addEventListener("input",()=>radio.audio.volume=Number(radio.volume.value));
-radio.audio.addEventListener("play",()=>setPlaying(true));radio.audio.addEventListener("pause",()=>setPlaying(false));radio.audio.addEventListener("waiting",()=>setState("Buffering…"));radio.audio.addEventListener("playing",()=>setState("Live audio playing"));radio.audio.addEventListener("error",()=>{setPlaying(false);if(currentRadio&&!radioOver&&streamRecovery<2){streamRecovery++;setState("Station dropped — finding another…");setTimeout(loadStation,450);return}setState("Stream unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent="This station stopped responding. Press Next to try another station.";radio.form.hidden=true;radio.actions.hidden=false});
+radio.audio.addEventListener("play",()=>setPlaying(true));radio.audio.addEventListener("pause",()=>setPlaying(false));radio.audio.addEventListener("waiting",()=>setState("Buffering…"));radio.audio.addEventListener("playing",()=>setState("Live audio playing"));radio.audio.addEventListener("error",()=>{setPlaying(false);if(currentRadio&&!radioOver&&streamRecovery<2){streamRecovery++;setState("Station dropped — finding another…");setTimeout(()=>loadStation(false),450);return}setState("Stream unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent="This station stopped responding. Press Next to try another station.";radio.form.hidden=true;radio.actions.hidden=false});
 function unlock(){ensureAudioGraph().then(ok=>{if(ok&&radio.audio.paused&&!radio.view.hidden)tryPlay(true)}).catch(()=>{});document.removeEventListener("pointerdown",unlock,true);document.removeEventListener("keydown",unlock,true)}document.addEventListener("pointerdown",unlock,true);document.addEventListener("keydown",unlock,true);
-radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",loadStation);flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",loadNews);window.addEventListener("resize",resizeCanvas);
-if(!raf)drawWave();loadStation();
+radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",()=>loadStation(true));flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",loadNews);window.addEventListener("resize",resizeCanvas);
+if(!raf)drawWave();loadStation(false);

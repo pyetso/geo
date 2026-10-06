@@ -258,6 +258,17 @@ const RADIO_BROWSER_HOSTS = [
   "https://nl1.api.radio-browser.info",
   "https://at1.api.radio-browser.info"
 ];
+const radioStreamCache = new Map();
+function rememberRadioStream(stationUuid, streamUrl) {
+  if (!stationUuid || !streamUrl) return;
+  radioStreamCache.set(stationUuid, { streamUrl, expiresAt: Date.now() + 10 * 60 * 1000 });
+}
+function cachedRadioStream(stationUuid) {
+  const hit = radioStreamCache.get(stationUuid);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) { radioStreamCache.delete(stationUuid); return null; }
+  return hit.streamUrl;
+}
 
 async function radioBrowserFetch(pathname, params = {}) {
   let lastError;
@@ -290,6 +301,7 @@ async function radioBrowserQuestion() {
   const preferred = usable.filter(s => Number(s.bitrate || 0) > 0 && Number(s.clickcount || 0) > 0);
   const pool = preferred.length >= 4 ? preferred : usable;
   const station = sample(pool)[0];
+  rememberRadioStream(station.stationuuid, station.url_resolved);
   const countries = [...new Set(pool.map(s => s.country).filter(Boolean))];
   const wrong = sample(countries.filter(c => c !== station.country), 3);
   if (wrong.length < 3) throw new Error("Radio Browser did not have enough country choices.");
@@ -321,9 +333,12 @@ async function radioQuestion() {
 
 async function resolveRadioBrowserStream(stationUuid) {
   if (!stationUuid || !/^[A-Za-z0-9-]{6,80}$/.test(stationUuid)) throw new Error("Invalid radio station.");
+  const cached = cachedRadioStream(stationUuid);
+  if (cached) return cached;
   const rows = await radioBrowserFetch(`/json/stations/byuuid/${encodeURIComponent(stationUuid)}`);
   const station = rows.find(s => s?.stationuuid === stationUuid) || rows[0];
   if (!station?.url_resolved || !/^(https?:)/i.test(station.url_resolved)) throw new Error("Station stream unavailable.");
+  rememberRadioStream(stationUuid, station.url_resolved);
   return station.url_resolved;
 }
 
