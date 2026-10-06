@@ -61,13 +61,20 @@
 
     <section class="game-view" id="window-view" data-game="window" aria-label="Window webcam country guessing game" hidden>
       <div class="window-stage">
-        <a class="window-frame" id="window-source-link" href="https://www.windy.com/webcams" target="_blank" rel="noopener noreferrer" aria-label="Open this webcam on Windy">
-          <div class="window-image-wrap">
-            <img id="window-image" alt="Current mystery webcam view" />
-            <div class="window-scan" aria-hidden="true"></div>
-            <div class="window-badge"><span class="window-dot"></span><span id="window-status">Finding a window…</span></div>
+        <div class="window-tv" aria-label="Retro television showing a mystery live webcam">
+          <div class="tv-antenna" aria-hidden="true"><span></span><span></span></div>
+          <div class="tv-cabinet">
+            <a class="window-frame" id="window-source-link" href="https://www.windy.com/webcams" target="_blank" rel="noopener noreferrer" aria-label="Open this webcam on Windy">
+              <div class="window-image-wrap">
+                <img id="window-image" alt="Current mystery webcam view" />
+                <div class="window-scan" aria-hidden="true"></div>
+                <div class="window-badge"><span class="window-dot"></span><span id="window-status">Finding a window…</span></div>
+                <div class="tv-glass" aria-hidden="true"></div>
+              </div>
+            </a>
           </div>
-        </a>
+          <div class="tv-feet" aria-hidden="true"><span></span><span></span></div>
+        </div>
         <div class="window-credit">Webcams provided by <a href="https://www.windy.com/" target="_blank" rel="noopener noreferrer">Windy.com</a></div>
       </div>
 
