@@ -20,7 +20,7 @@
 
       <audio id="radio-player" preload="auto" crossorigin="anonymous"></audio>
 
-      <div class="player-row" aria-label="Radio controls">
+      <div class="player-row" aria-label="Radio controls" hidden>
         <button class="circle-control primary" id="play-pause" type="button" aria-label="Play radio" title="Play or pause">
           <svg class="icon-pause" viewBox="0 0 24 24"><path d="M8 6v12M16 6v12"/></svg>
           <svg class="icon-play" viewBox="0 0 24 24"><path d="m9 7 8 5-8 5Z"/></svg>
@@ -38,7 +38,7 @@
         </div>
       </div>
 
-      <div class="interaction-block" id="radio-interaction">
+      <div class="interaction-block" id="radio-interaction" hidden>
         <form class="guess-form" id="guess-form" autocomplete="off">
           <div class="country-combobox">
             <label class="sr-only" for="country-input">Country</label>
@@ -48,6 +48,7 @@
           <button class="guess-button" type="submit">Guess</button>
         </form>
 
+        <div class="feedback" id="feedback" aria-live="polite"></div>
         <div class="station-actions" id="station-actions" hidden>
           <button class="next-button" id="next-after-answer" type="button">Next</button>
         </div>
@@ -56,8 +57,6 @@
           <div class="guess-board-rows" id="previous-guesses-list"></div>
           <div class="guess-slots" id="guess-slots" aria-hidden="true"></div>
         </div>
-
-        <div class="feedback" id="feedback" aria-live="polite"></div>
       </div>
     </section>
 
@@ -90,12 +89,13 @@
           </div>
           <button class="guess-button" type="submit">Guess</button>
         </form>
+        <div class="feedback" id="window-feedback" aria-live="polite"></div>
+
         <div class="station-actions" id="window-actions" hidden><button class="next-button" id="next-window" type="button">Next</button></div>
         <div class="guess-board" id="window-previous-guesses" hidden aria-live="polite">
           <div class="guess-board-rows" id="window-previous-guesses-list"></div>
           <div class="guess-slots" id="window-guess-slots" aria-hidden="true"></div>
         </div>
-        <div class="feedback" id="window-feedback" aria-live="polite"></div>
       </div>
     </section>
 
@@ -137,6 +137,8 @@
           </div>
           <button class="guess-button" type="submit">Guess</button>
         </form>
+        <div class="feedback" id="flight-feedback" aria-live="polite"></div>
+
         <div class="station-actions" id="flight-actions" hidden>
           <button class="next-button" id="next-flight" type="button">Next</button>
         </div>
@@ -144,7 +146,6 @@
           <div class="guess-board-rows" id="flight-previous-guesses-list"></div>
           <div class="guess-slots" id="flight-guess-slots" aria-hidden="true"></div>
         </div>
-        <div class="feedback" id="flight-feedback" aria-live="polite"></div>
       </div>
     </section>
     <section class="game-view" id="news-view" data-game="news" aria-label="Newspaper country guessing game" hidden>
@@ -169,12 +170,13 @@
           </div>
           <button class="guess-button" type="submit">Guess</button>
         </form>
+        <div class="feedback" id="news-feedback" aria-live="polite"></div>
+
         <div class="station-actions" id="news-actions" hidden><button class="next-button" id="next-news" type="button">Next</button></div>
         <div class="guess-board" id="news-previous-guesses" hidden aria-live="polite">
           <div class="guess-board-rows" id="news-previous-guesses-list"></div>
           <div class="guess-slots" id="news-guess-slots" aria-hidden="true"></div>
         </div>
-        <div class="feedback" id="news-feedback" aria-live="polite"></div>
       </div>
     </section>
   </main>
