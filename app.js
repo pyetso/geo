@@ -15,7 +15,7 @@ const ALIASES = new Map(Object.entries({
 const $ = id => document.getElementById(id);
 
 const radio = {
-  view: $("radio-view"), start: $("start-radio-round"), audio: $("radio-player"), canvas: $("waveform"), state: $("audio-state"), play: $("play-pause"), restart: $("restart"),
+  view: $("radio-view"), audio: $("radio-player"), canvas: $("waveform"), state: $("audio-state"), play: $("play-pause"), restart: $("restart"),
   volumeToggle: $("volume-toggle"), volume: $("volume"), input: $("country-input"), suggestions: $("country-suggestions"), form: $("guess-form"),
   guessButton: $("guess-form").querySelector(".guess-button"), feedback: $("feedback"), next: $("next-after-answer"), actions: $("station-actions"),
   board: $("previous-guesses"), rows: $("previous-guesses-list"), slots: $("guess-slots"), beam: $("radio-interaction"), controls: document.querySelector("#radio-view .player-row")
@@ -43,7 +43,7 @@ let currentNews=null, newsTries=5, newsOver=false, newsLastDistance=null, newsHi
 let currentWindow=null, windowTries=5, windowOver=false, windowLastDistance=null, windowHistory=[];
 let audioContext=null, analyser=null, sourceNode=null, raf=null, smoothBars=[], normalizedEnvelope=.12;
 let resultEffect=null, resultEffectTimer=null;
-let radioBuffering=false, radioSearching=false, radioTransitionUntil=0, radioRequestId=0, radioStarted=false;
+let radioBuffering=false, radioSearching=false, radioTransitionUntil=0, radioRequestId=0, radioStarted=false, radioPlayRequested=false, radioEverPlayed=false;
 
 function normalize(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[’']/g,"").replace(/[^a-zA-Z0-9]+/g," ").trim().toLowerCase()}
 const LOOKUP=new Map(COUNTRY_NAMES.map(n=>[normalize(n),n])); for(const [a,n] of ALIASES) LOOKUP.set(normalize(a),n);
@@ -67,7 +67,7 @@ function flashBorderBeam(_el,result){
 }
 async function fetchJson(url){const r=await fetch(url,{cache:"no-store"});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||`${r.status} ${r.statusText}`);return b}
 function flagFor(country){const canonical=canonicalCountry(country)||country;const code=COUNTRY_CODE.get(normalize(canonical));return code?String.fromCodePoint(...code.split("").map(c=>127397+c.charCodeAt(0))):"🌐"}
-function answerResult(country,correct){const safe=escapeHtml(country),code=COUNTRY_CODE.get(normalize(canonicalCountry(country)||country));const fallback=flagFor(country);const flag=code?`<img class="result-flag-image" src="https://flagcdn.com/${code.toLowerCase()}.svg" alt="${safe} flag" onerror="this.replaceWith(document.createTextNode(this.dataset.fallback))" data-fallback="${fallback}">`:`<span aria-hidden="true">${fallback}</span>`;return `<span class="result-flag">${flag}</span> <strong>${correct?"Correct!":"Round over."}</strong> The country was <strong>${safe}</strong>.`}
+function answerResult(country,correct){const safe=escapeHtml(country);const flag=flagFor(country);return `<span class="result-flag" role="img" aria-label="${safe} flag">${flag}</span> <strong>${correct?"Correct!":"Round over."}</strong> The country was <strong>${safe}</strong>.`}
 function showAnswer(ui,country,correct){ui.feedback.className=`feedback round-result ${correct?"correct":"wrong"}`;ui.feedback.innerHTML=answerResult(country,correct)}
 
 function buildSuggestions(q){q=normalize(q);if(!q)return[];const starts=COUNTRY_NAMES.filter(n=>normalize(n).startsWith(q));const contains=COUNTRY_NAMES.filter(n=>!starts.includes(n)&&normalize(n).includes(q));const fuzzy=COUNTRY_NAMES.filter(n=>!starts.includes(n)&&!contains.includes(n)).map(n=>({n,d:levenshtein(q,n)})).filter(x=>x.d<=Math.max(2,Math.floor(q.length*.28))).sort((a,b)=>a.d-b.d).map(x=>x.n);return [...starts,...contains,...fuzzy].slice(0,7)}
@@ -97,6 +97,7 @@ async function distanceHint(guess,answer,lastDistance,answerCode=""){
 
 /* ---------------- Radio ---------------- */
 function setPlaying(playing){radio.play.classList.toggle("paused",!playing);radio.play.setAttribute("aria-label",playing?"Pause radio":"Play radio")}
+function dismissPlayLabel(){if(radioEverPlayed)return;radioEverPlayed=true;radio.play.classList.add("label-dismissed");setTimeout(()=>radio.play.classList.remove("play-with-label"),450)}
 function setState(t){radio.state.textContent=t}
 async function ensureAudioGraph(){
   const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return false;
@@ -157,16 +158,16 @@ function prefetchNextRadio(){
   return nextRadioPromise;
 }
 async function loadStation(usePrefetch=false){
-  const requestId=++radioRequestId;radioStarted=true;radioSearching=true;radioBuffering=true;radio.controls.hidden=false;radio.beam.hidden=false;radioTransitionUntil=performance.now()+1400;radio.audio.pause();radio.start.hidden=true;radio.view.classList.add("radio-searching");
+  const requestId=++radioRequestId;radioStarted=true;radioSearching=true;radioBuffering=true;radio.controls.hidden=false;radio.beam.hidden=false;radioTransitionUntil=performance.now()+1400;radio.audio.pause();radio.view.classList.add("radio-searching");
   streamRecovery=0;radioOver=true;currentRadio=null;radioTries=5;radioLastDistance=null;radioHistory=[];radio.input.value="";radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=false;radio.feedback.textContent="";radio.feedback.className="feedback";radio.actions.hidden=true;renderRadioHistory();setState(usePrefetch&&nextRadioPromise?"Switching station…":"Finding a station…");closeRadioSuggestions();
   try{
     let q;
     if(usePrefetch&&nextRadioPromise){const prefetched=nextRadioPromise;nextRadioPromise=null;q=await prefetched}else q=await fetchRadioQuestion();
-    if(requestId!==radioRequestId)return;radioSearching=false;radioBuffering=true;radio.view.classList.remove("radio-searching");currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState("Starting live audio…");
+    if(requestId!==radioRequestId)return;radioSearching=false;radioBuffering=true;radio.view.classList.remove("radio-searching");currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState(radioPlayRequested?"Starting live audio…":"Radio ready · press Play radio");
     // Fetch the following round while the player is listening, so Next usually has no API wait.
     prefetchNextRadio().catch(()=>{});
-    await tryPlay(false)
-  }catch(e){if(requestId!==radioRequestId)return;radioSearching=false;radioBuffering=false;radio.view.classList.remove("radio-searching");setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message;radio.start.hidden=false;radio.start.textContent="Try another station"}
+    if(radioPlayRequested)await tryPlay(false);else{radioBuffering=false;setPlaying(false)}
+  }catch(e){if(requestId!==radioRequestId)return;radioSearching=false;radioBuffering=false;radio.view.classList.remove("radio-searching");setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message;radio.feedback.className="feedback wrong";radio.feedback.textContent="Could not find a radio station. Press restart to try again."}
 }
 async function checkRadioGuess(){
   if(!currentRadio||radioOver)return;const raw=radio.input.value.trim();if(!raw){radio.feedback.className="feedback wrong";radio.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){radio.feedback.className="feedback wrong";radio.feedback.textContent="Choose a country from the list, or check the spelling.";return}radio.input.value=corrected;closeRadioSuggestions();
@@ -249,14 +250,13 @@ function finishNewsRound(){news.input.disabled=true;news.guessButton.disabled=tr
 /* ---------------- Navigation + events ---------------- */
 function switchGame(target){
   document.querySelectorAll(".game-view").forEach(v=>{const on=v.dataset.game===target;v.hidden=!on;v.classList.toggle("active",on)});document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.classList.toggle("active",b.dataset.target===target));
-  if(target!=="radio"&&!radio.audio.paused){radio.audio.pause();setPlaying(false);setState("Paused")}
+  if(target!=="radio"){radioPlayRequested=false;if(!radio.audio.paused){radio.audio.pause();setPlaying(false);setState("Paused")}}
   if(target==="window"&&!currentWindow)loadWindow();else if(target==="flight"&&!currentFlight)loadFlight();else if(target==="news"&&!currentNews)loadNews();else if(target==="radio"&&currentRadio&&!radioOver)setState(radio.audio.paused?"Tap play to start audio":"Live audio playing");
 }
 document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.addEventListener("click",()=>switchGame(b.dataset.target)));
-radio.start.addEventListener("click",async()=>{if(radioSearching)return;radio.start.disabled=true;await ensureAudioGraph();radio.start.disabled=false;loadStation(false)});
-radio.play.addEventListener("click",async()=>{if(!radioStarted){radio.start.click();return}await ensureAudioGraph();if(radio.audio.paused)await tryPlay(true);else{radio.audio.pause();setPlaying(false);setState("Paused")}});
-radio.restart.addEventListener("click",async()=>{if(!currentRadio)return;await ensureAudioGraph();radio.audio.pause();radioBuffering=true;radio.audio.src=currentRadio.stream;radio.audio.load();setState("Restarting stream…");await tryPlay(true)});
+radio.play.addEventListener("click",async()=>{if(radio.audio.paused){radioPlayRequested=true;dismissPlayLabel();await ensureAudioGraph();if(currentRadio)await tryPlay(true);else if(!radioSearching)loadStation(false);else setState("Finding a station…")}else{radioPlayRequested=false;radio.audio.pause();setPlaying(false);setState("Paused")}});
+radio.restart.addEventListener("click",async()=>{if(!currentRadio){radioPlayRequested=false;loadStation(false);return}radioPlayRequested=true;dismissPlayLabel();await ensureAudioGraph();radio.audio.pause();radioBuffering=true;radio.audio.src=currentRadio.stream;radio.audio.load();setState("Restarting stream…");await tryPlay(true)});
 radio.volumeToggle.addEventListener("click",()=>radio.volumeToggle.closest(".volume-control").classList.toggle("open"));radio.volume.addEventListener("input",()=>radio.audio.volume=Number(radio.volume.value));
 radio.audio.addEventListener("play",()=>setPlaying(true));radio.audio.addEventListener("pause",()=>setPlaying(false));radio.audio.addEventListener("waiting",()=>{radioBuffering=true;setState("Buffering…")});radio.audio.addEventListener("playing",()=>{radioBuffering=false;setState("Live audio playing")});radio.audio.addEventListener("canplay",()=>{if(!radio.audio.paused)radioBuffering=false});radio.audio.addEventListener("error",()=>{radioBuffering=false;setPlaying(false);if(currentRadio&&!radioOver&&streamRecovery<2){streamRecovery++;setState("Station dropped — finding another…");setTimeout(()=>loadStation(false),450);return}setState("Stream unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent="This station stopped responding. Press Next to try another station.";radio.form.hidden=true;radio.actions.hidden=false});
 radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",()=>{radioTransitionUntil=performance.now()+1600;loadStation(true)});windowGame.form.addEventListener("submit",e=>{e.preventDefault();checkWindowGuess()});windowGame.next.addEventListener("click",loadWindow);flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",async()=>{const card=news.view.querySelector(".newspaper-card");if(card.classList.contains("paper-taking-flight"))return;card.classList.add("paper-taking-flight");await new Promise(resolve=>setTimeout(resolve,550));await loadNews();card.classList.remove("paper-taking-flight");card.classList.add("paper-landing");setTimeout(()=>card.classList.remove("paper-landing"),700)});window.addEventListener("resize",resizeCanvas);
-radio.input.disabled=true;radio.guessButton.disabled=true;setPlaying(false);if(!raf)drawWave();
+radio.input.disabled=true;radio.guessButton.disabled=true;setPlaying(false);if(!raf)drawWave();loadStation(false);

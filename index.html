@@ -16,14 +16,13 @@
         <div id="audio-state" class="audio-state">Ready when you are</div>
       </div>
 
-      <button id="start-radio-round" class="start-round-button" type="button">Start round <span aria-hidden="true">↗</span></button>
-
       <audio id="radio-player" preload="auto" crossorigin="anonymous"></audio>
 
-      <div class="player-row" aria-label="Radio controls" hidden>
-        <button class="circle-control primary" id="play-pause" type="button" aria-label="Play radio" title="Play or pause">
+      <div class="player-row" aria-label="Radio controls">
+        <button class="circle-control primary paused play-with-label" id="play-pause" type="button" aria-label="Play radio" title="Play or pause">
           <svg class="icon-pause" viewBox="0 0 24 24"><path d="M8 6v12M16 6v12"/></svg>
           <svg class="icon-play" viewBox="0 0 24 24"><path d="m9 7 8 5-8 5Z"/></svg>
+          <span class="play-radio-label">Play radio</span>
         </button>
         <button class="circle-control" id="restart" type="button" aria-label="Restart stream" title="Restart stream">
           <svg viewBox="0 0 24 24"><path d="M4 8V4m0 0h4M4 4l4 4a7 7 0 1 1-1.4 8.2"/></svg>
@@ -38,7 +37,7 @@
         </div>
       </div>
 
-      <div class="interaction-block" id="radio-interaction" hidden>
+      <div class="interaction-block" id="radio-interaction">
         <form class="guess-form" id="guess-form" autocomplete="off">
           <div class="country-combobox">
             <label class="sr-only" for="country-input">Country</label>

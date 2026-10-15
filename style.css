@@ -63,3 +63,11 @@ body.beam-correct::after{animation:viewportBeamPulse 5s ease-out forwards}
 .result-flag{display:inline-flex;align-items:center;justify-content:center;min-width:27px;margin-right:6px;font-size:23px}
 .result-flag-image{display:block;width:27px;height:19px;object-fit:cover;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
 .feedback.round-result + .station-actions,.feedback.round-result + .game-actions{margin-top:16px}
+
+/* Initial play prompt lives inside the original playback control. */
+.circle-control.primary.play-with-label{width:140px;border-radius:999px;display:flex;align-items:center;justify-content:center;gap:9px;transition:width .42s cubic-bezier(.2,.8,.2,1),border-radius .42s ease,transform .15s ease}
+.play-radio-label{display:none;white-space:nowrap;font-size:13px;font-weight:600;max-width:85px;overflow:hidden;opacity:1;transition:max-width .36s ease,opacity .24s ease,margin .36s ease}
+.play-with-label .play-radio-label{display:inline-block}
+.play-with-label.label-dismissed{width:50px!important;border-radius:50%!important;gap:0}
+.play-with-label.label-dismissed .play-radio-label{opacity:0;max-width:0;margin:0}
+@media(prefers-reduced-motion:reduce){.circle-control.primary.play-with-label,.play-radio-label{transition:none!important}}
