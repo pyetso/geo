@@ -15,13 +15,13 @@ const ALIASES = new Map(Object.entries({
 const $ = id => document.getElementById(id);
 
 const radio = {
-  view: $("radio-view"), audio: $("radio-player"), canvas: $("waveform"), state: $("audio-state"), play: $("play-pause"), restart: $("restart"),
+  view: $("radio-view"), start: $("start-radio-round"), audio: $("radio-player"), canvas: $("waveform"), state: $("audio-state"), play: $("play-pause"), restart: $("restart"),
   volumeToggle: $("volume-toggle"), volume: $("volume"), input: $("country-input"), suggestions: $("country-suggestions"), form: $("guess-form"),
   guessButton: $("guess-form").querySelector(".guess-button"), feedback: $("feedback"), next: $("next-after-answer"), actions: $("station-actions"),
   board: $("previous-guesses"), rows: $("previous-guesses-list"), slots: $("guess-slots"), beam: $("radio-interaction")
 };
 const flight = {
-  view: $("flight-view"), from: $("flight-from"), to: $("flight-to"), number: $("flight-number"), airline: $("flight-airline"), altitude: $("flight-altitude"), speed: $("flight-speed"), marker: $("plane-marker"),
+  view: $("flight-view"), from: $("flight-from"), to: $("flight-to"), number: $("flight-number"), airline: $("flight-airline"), altitude: $("flight-altitude"), speed: $("flight-speed"), departureTime: $("flight-departure-time"), arrivalTime: $("flight-arrival-time"), marker: $("plane-marker"),
   path: $("flight-route-path"), depDot: $("flight-departure-dot"), arrDot: $("flight-arrival-dot"),
   question: $("flight-question"), input: $("flight-country-input"), suggestions: $("flight-country-suggestions"), form: $("flight-guess-form"), guessButton: $("flight-guess-form").querySelector(".guess-button"), feedback: $("flight-feedback"), actions: $("flight-actions"), next: $("next-flight"),
   board: $("flight-previous-guesses"), rows: $("flight-previous-guesses-list"), slots: $("flight-guess-slots"), beam: $("flight-interaction")
@@ -43,6 +43,7 @@ let currentNews=null, newsTries=5, newsOver=false, newsLastDistance=null, newsHi
 let currentWindow=null, windowTries=5, windowOver=false, windowLastDistance=null, windowHistory=[];
 let audioContext=null, analyser=null, sourceNode=null, raf=null, smoothBars=[], normalizedEnvelope=.12;
 let resultEffect=null, resultEffectTimer=null;
+let radioSearching=false, radioTransitionUntil=0, radioRequestId=0, radioStarted=false;
 
 function normalize(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[’']/g,"").replace(/[^a-zA-Z0-9]+/g," ").trim().toLowerCase()}
 const LOOKUP=new Map(COUNTRY_NAMES.map(n=>[normalize(n),n])); for(const [a,n] of ALIASES) LOOKUP.set(normalize(a),n);
@@ -110,10 +111,11 @@ function drawWave(){
   if(live)analyser.getByteTimeDomainData(data);if(smoothBars.length!==count)smoothBars=new Array(count).fill(.018);
   let framePeak=.001;
   if(live){for(let i=0;i<data.length;i++)framePeak=Math.max(framePeak,Math.abs(data[i]-128)/128);normalizedEnvelope=normalizedEnvelope*.90+framePeak*.10}
+  const waveMotion=radioSearching||performance.now()<radioTransitionUntil;
   const gain=live?Math.min(5.6,Math.max(1.45,.56/Math.max(normalizedEnvelope,.035))):1;
   const raw=new Array(count).fill(.018);
   for(let i=0;i<count;i++){
-    if(!live)continue;const a=Math.floor(i*data.length/count),b=Math.max(a+1,Math.floor((i+1)*data.length/count));let peak=0,rms=0,n=0;
+    if(!live){if(waveMotion){const t=performance.now()*.0026,center=Math.exp(-Math.pow((i/count-.5)*2.1,2));raw[i]=.07+center*(.18+.22*Math.abs(Math.sin(t*1.8+i*.19))+.11*Math.sin(t*2.6-i*.12)**2)}continue;}const a=Math.floor(i*data.length/count),b=Math.max(a+1,Math.floor((i+1)*data.length/count));let peak=0,rms=0,n=0;
     for(let j=a;j<b;j++){const s=Math.abs(data[j]-128)/128;peak=Math.max(peak,s);rms+=s*s;n++}
     rms=Math.sqrt(rms/Math.max(1,n));let v=(peak*.58+rms*.82)*gain;v=Math.pow(Math.min(1,v),.72);raw[i]=Math.max(.018,Math.min(.98,v));
   }
@@ -153,15 +155,16 @@ function prefetchNextRadio(){
   return nextRadioPromise;
 }
 async function loadStation(usePrefetch=false){
+  const requestId=++radioRequestId;radioStarted=true;radioSearching=true;radioTransitionUntil=performance.now()+1400;radio.audio.pause();radio.start.hidden=true;radio.view.classList.add("radio-searching");
   streamRecovery=0;radioOver=true;currentRadio=null;radioTries=5;radioLastDistance=null;radioHistory=[];radio.input.value="";radio.input.disabled=true;radio.guessButton.disabled=true;radio.form.hidden=false;radio.feedback.textContent="";radio.feedback.className="feedback";radio.actions.hidden=true;renderRadioHistory();setState(usePrefetch&&nextRadioPromise?"Switching station…":"Finding a station…");closeRadioSuggestions();
   try{
     let q;
     if(usePrefetch&&nextRadioPromise){const prefetched=nextRadioPromise;nextRadioPromise=null;q=await prefetched}else q=await fetchRadioQuestion();
-    currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState("Starting live audio…");
+    if(requestId!==radioRequestId)return;radioSearching=false;radio.view.classList.remove("radio-searching");currentRadio=q;radio.audio.pause();radio.audio.src=q.stream;radio.audio.volume=Number(radio.volume.value);radio.audio.load();radioOver=false;radio.input.disabled=false;radio.guessButton.disabled=false;setState("Starting live audio…");
     // Fetch the following round while the player is listening, so Next usually has no API wait.
     prefetchNextRadio().catch(()=>{});
     await tryPlay(false)
-  }catch(e){setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message}
+  }catch(e){if(requestId!==radioRequestId)return;radioSearching=false;radio.view.classList.remove("radio-searching");setState("Station unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent=e.message;radio.start.hidden=false;radio.start.textContent="Try another station"}
 }
 async function checkRadioGuess(){
   if(!currentRadio||radioOver)return;const raw=radio.input.value.trim();if(!raw){radio.feedback.className="feedback wrong";radio.feedback.textContent="Type a country first.";return}const corrected=canonicalCountry(raw);if(!corrected){radio.feedback.className="feedback wrong";radio.feedback.textContent="Choose a country from the list, or check the spelling.";return}radio.input.value=corrected;closeRadioSuggestions();
@@ -205,13 +208,14 @@ async function checkWindowGuess(){
 function finishWindowRound(){windowGame.input.disabled=true;windowGame.guessButton.disabled=true;windowGame.form.hidden=true;windowGame.actions.hidden=false}
 
 /* ---------------- Flights ---------------- */
-function resetFlightVisual(){flight.from.textContent="---";flight.to.textContent="---";flight.number.textContent="—";flight.airline.textContent="—";flight.altitude.textContent="—";flight.speed.textContent="—";flight.path.setAttribute("d","M60 150 Q340 40 620 150");flight.marker.setAttribute("transform","translate(340 80)");flight.question.textContent="Finding an active flight…"}
+function flightTime(value){if(!value)return "Not available";const d=new Date(value);if(Number.isNaN(d.getTime()))return "Not available";const iso=String(value).match(/([+-])(\d{2}):(\d{2})$/);const offset=iso?(iso[1]==="-"?-1:1)*(Number(iso[2])*60+Number(iso[3])):0;const clock=new Date(d.getTime()+offset*60000);return new Intl.DateTimeFormat("en",{hour:"numeric",minute:"2-digit",hour12:true,timeZone:"UTC"}).format(clock)+(iso?` UTC${iso[1]}${iso[2]}:${iso[3]}`:" UTC")}
+function resetFlightVisual(){flight.from.textContent="---";flight.to.textContent="---";flight.number.textContent="—";flight.airline.textContent="—";flight.altitude.textContent="—";flight.speed.textContent="—";flight.departureTime.textContent="—";flight.arrivalTime.textContent="—";flight.path.setAttribute("d","M60 150 Q340 40 620 150");flight.marker.setAttribute("transform","translate(340 80)");flight.question.textContent="Finding an active flight…"}
 function toVec(lat,lon){const p=lat*Math.PI/180,l=lon*Math.PI/180;return [Math.cos(p)*Math.cos(l),Math.cos(p)*Math.sin(l),Math.sin(p)]}
 function fromVec(v){const m=Math.hypot(...v)||1,x=v[0]/m,y=v[1]/m,z=v[2]/m;return {lat:Math.asin(z)*180/Math.PI,lon:Math.atan2(y,x)*180/Math.PI}}
 function greatCircle(a,b,steps=48){const va=toVec(a.lat,a.lon),vb=toVec(b.lat,b.lon),dot=Math.max(-1,Math.min(1,va[0]*vb[0]+va[1]*vb[1]+va[2]*vb[2])),omega=Math.acos(dot),sin=Math.sin(omega);const out=[];for(let i=0;i<=steps;i++){const t=i/steps;if(sin<1e-6){out.push({lat:a.lat+(b.lat-a.lat)*t,lon:a.lon+(b.lon-a.lon)*t});continue}const u=Math.sin((1-t)*omega)/sin,v=Math.sin(t*omega)/sin;out.push(fromVec([va[0]*u+vb[0]*v,va[1]*u+vb[1]*v,va[2]*u+vb[2]*v]))}for(let i=1;i<out.length;i++){while(out[i].lon-out[i-1].lon>180)out[i].lon-=360;while(out[i].lon-out[i-1].lon<-180)out[i].lon+=360}return out}
 function projectFlightRoute(q){const dep=q.route?.departure,arr=q.route?.arrival;if(!dep||!arr)return;const pts=greatCircle(dep,arr),extra=q.live?[{lat:q.live.lat,lon:q.live.lon}]:[];const all=[...pts,...extra];let minLon=Math.min(...pts.map(p=>p.lon)),maxLon=Math.max(...pts.map(p=>p.lon)),minLat=Math.min(...pts.map(p=>p.lat)),maxLat=Math.max(...pts.map(p=>p.lat));const lonSpan=Math.max(8,maxLon-minLon),latSpan=Math.max(8,maxLat-minLat);minLon-=(lonSpan*.08);maxLon+=(lonSpan*.08);minLat-=(latSpan*.24);maxLat+=(latSpan*.24);const project=p=>({x:48+(p.lon-minLon)/(maxLon-minLon)*584,y:184-(p.lat-minLat)/(maxLat-minLat)*142});const xy=pts.map(project);flight.path.setAttribute("d",xy.map((p,i)=>`${i?"L":"M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" "));const d=xy[0],a=xy[xy.length-1];flight.depDot.setAttribute("cx",d.x);flight.depDot.setAttribute("cy",d.y);flight.arrDot.setAttribute("cx",a.x);flight.arrDot.setAttribute("cy",a.y);flight.from.setAttribute("x",d.x);flight.from.setAttribute("y",Math.min(210,d.y+26));flight.to.setAttribute("x",a.x);flight.to.setAttribute("y",Math.min(210,a.y+26));let mark=xy[Math.floor(xy.length/2)],angle=0;if(q.live){let live={lat:q.live.lat,lon:q.live.lon};while(live.lon-dep.lon>180)live.lon-=360;while(live.lon-dep.lon<-180)live.lon+=360;mark=project(live);const nearest=xy.reduce((best,p,i)=>Math.hypot(p.x-mark.x,p.y-mark.y)<best.d?{d:Math.hypot(p.x-mark.x,p.y-mark.y),i}:best,{d:Infinity,i:0}).i;const p1=xy[Math.max(0,nearest-1)],p2=xy[Math.min(xy.length-1,nearest+1)];angle=Math.atan2(p2.y-p1.y,p2.x-p1.x)*180/Math.PI+90}else{const i=Math.floor(xy.length/2),p1=xy[i-1],p2=xy[i+1];angle=Math.atan2(p2.y-p1.y,p2.x-p1.x)*180/Math.PI+90}flight.marker.setAttribute("transform",`translate(${mark.x.toFixed(1)} ${mark.y.toFixed(1)}) rotate(${angle.toFixed(1)})`)}
 function fillFlightVisual(q){
-  flight.from.textContent=q.route?.departure?.iata||"DEP";flight.to.textContent=q.route?.arrival?.iata||"ARR";flight.number.textContent=q.flight||"Active flight";flight.airline.textContent=q.airline||"Airline";flight.altitude.textContent=q.live?.altitudeM?`${Math.round(q.live.altitudeM).toLocaleString()} m`:"Route data";flight.speed.textContent=q.live?.speedKmh?`${Math.round(q.live.speedKmh).toLocaleString()} km/h`:"—";flight.question.textContent=q.prompt||"Which country is connected to this flight?";projectFlightRoute(q);
+  flight.from.textContent=q.route?.departure?.iata||"DEP";flight.to.textContent=q.route?.arrival?.iata||"ARR";flight.number.textContent=q.flight||"Active flight";flight.airline.textContent=q.airline||"Airline";flight.altitude.textContent=q.live?.altitudeM?`${Math.round(q.live.altitudeM).toLocaleString()} m`:"Route data";flight.speed.textContent=q.live?.speedKmh?`${Math.round(q.live.speedKmh).toLocaleString()} km/h`:"—";flight.departureTime.textContent=flightTime(q.route?.departure?.time);flight.arrivalTime.textContent=flightTime(q.route?.arrival?.time);flight.question.textContent=q.prompt||"Which country is connected to this flight?";projectFlightRoute(q);
 }
 async function loadFlight(){
   flightOver=true;currentFlight=null;flightTries=5;flightLastDistance=null;flightHistory=[];renderGameHistory(flight,flightHistory);flight.input.value="";flight.input.disabled=true;flight.guessButton.disabled=true;flight.form.hidden=false;flight.actions.hidden=true;flight.feedback.textContent="";flight.feedback.className="feedback";resetFlightVisual();closeFlightSuggestions();
@@ -247,10 +251,10 @@ function switchGame(target){
   if(target==="window"&&!currentWindow)loadWindow();else if(target==="flight"&&!currentFlight)loadFlight();else if(target==="news"&&!currentNews)loadNews();else if(target==="radio"&&currentRadio&&!radioOver)setState(radio.audio.paused?"Tap play to start audio":"Live audio playing");
 }
 document.querySelectorAll(".game-nav-button[data-target]").forEach(b=>b.addEventListener("click",()=>switchGame(b.dataset.target)));
-radio.play.addEventListener("click",async()=>{await ensureAudioGraph();if(radio.audio.paused)await tryPlay(true);else{radio.audio.pause();setPlaying(false);setState("Paused")}});
+radio.start.addEventListener("click",async()=>{if(radioSearching)return;radio.start.disabled=true;await ensureAudioGraph();radio.start.disabled=false;loadStation(false)});
+radio.play.addEventListener("click",async()=>{if(!radioStarted){radio.start.click();return}await ensureAudioGraph();if(radio.audio.paused)await tryPlay(true);else{radio.audio.pause();setPlaying(false);setState("Paused")}});
 radio.restart.addEventListener("click",async()=>{if(!currentRadio)return;await ensureAudioGraph();radio.audio.pause();radio.audio.src=currentRadio.stream;radio.audio.load();setState("Restarting stream…");await tryPlay(true)});
 radio.volumeToggle.addEventListener("click",()=>radio.volumeToggle.closest(".volume-control").classList.toggle("open"));radio.volume.addEventListener("input",()=>radio.audio.volume=Number(radio.volume.value));
 radio.audio.addEventListener("play",()=>setPlaying(true));radio.audio.addEventListener("pause",()=>setPlaying(false));radio.audio.addEventListener("waiting",()=>setState("Buffering…"));radio.audio.addEventListener("playing",()=>setState("Live audio playing"));radio.audio.addEventListener("error",()=>{setPlaying(false);if(currentRadio&&!radioOver&&streamRecovery<2){streamRecovery++;setState("Station dropped — finding another…");setTimeout(()=>loadStation(false),450);return}setState("Stream unavailable");radio.feedback.className="feedback wrong";radio.feedback.textContent="This station stopped responding. Press Next to try another station.";radio.form.hidden=true;radio.actions.hidden=false});
-function unlock(){ensureAudioGraph().then(ok=>{if(ok&&radio.audio.paused&&!radio.view.hidden)tryPlay(true)}).catch(()=>{});document.removeEventListener("pointerdown",unlock,true);document.removeEventListener("keydown",unlock,true)}document.addEventListener("pointerdown",unlock,true);document.addEventListener("keydown",unlock,true);
-radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",()=>loadStation(true));windowGame.form.addEventListener("submit",e=>{e.preventDefault();checkWindowGuess()});windowGame.next.addEventListener("click",loadWindow);flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",loadNews);window.addEventListener("resize",resizeCanvas);
-if(!raf)drawWave();loadStation(false);
+radio.form.addEventListener("submit",e=>{e.preventDefault();checkRadioGuess()});radio.next.addEventListener("click",()=>{radioTransitionUntil=performance.now()+1600;loadStation(true)});windowGame.form.addEventListener("submit",e=>{e.preventDefault();checkWindowGuess()});windowGame.next.addEventListener("click",loadWindow);flight.form.addEventListener("submit",e=>{e.preventDefault();checkFlightGuess()});flight.next.addEventListener("click",loadFlight);news.form.addEventListener("submit",e=>{e.preventDefault();checkNewsGuess()});news.next.addEventListener("click",async()=>{const card=news.view.querySelector(".newspaper-card");if(card.classList.contains("paper-taking-flight"))return;card.classList.add("paper-taking-flight");await new Promise(resolve=>setTimeout(resolve,550));await loadNews();card.classList.remove("paper-taking-flight");card.classList.add("paper-landing");setTimeout(()=>card.classList.remove("paper-landing"),700)});window.addEventListener("resize",resizeCanvas);
+radio.input.disabled=true;radio.guessButton.disabled=true;setPlaying(false);if(!raf)drawWave();

@@ -13,8 +13,10 @@
     <section class="game-view active" id="radio-view" data-game="radio" aria-label="Radio country guessing game">
       <div class="wave-wrap" id="wave-wrap">
         <canvas id="waveform" aria-label="Live audio waveform"></canvas>
-        <div id="audio-state" class="audio-state">Finding a station…</div>
+        <div id="audio-state" class="audio-state">Ready when you are</div>
       </div>
+
+      <button id="start-radio-round" class="start-round-button" type="button">Start round <span aria-hidden="true">↗</span></button>
 
       <audio id="radio-player" preload="auto" crossorigin="anonymous"></audio>
 
@@ -100,6 +102,7 @@
     <section class="game-view" id="flight-view" data-game="flight" aria-label="Flight country guessing game" hidden>
       <div class="flight-card">
         <div class="flight-illustration" aria-label="Geographic flight route illustration">
+          <div class="flight-cloud flight-cloud-one" aria-hidden="true"></div><div class="flight-cloud flight-cloud-two" aria-hidden="true"></div>
           <svg id="flight-route-svg" viewBox="0 0 680 220" role="img" aria-label="Actual route geometry between departure and arrival">
             <path class="flight-gridline" d="M28 110H652"/>
             <path class="flight-path" id="flight-route-path" d="M60 150 Q340 40 620 150"/>
@@ -119,6 +122,8 @@
           <div><span class="flight-label">Airline</span><strong id="flight-airline">—</strong></div>
           <div><span class="flight-label">Altitude</span><strong id="flight-altitude">—</strong></div>
           <div><span class="flight-label">Speed</span><strong id="flight-speed">—</strong></div>
+          <div><span class="flight-label">Departure · local</span><strong id="flight-departure-time">—</strong></div>
+          <div><span class="flight-label">Arrival · local</span><strong id="flight-arrival-time">—</strong></div>
         </div>
       </div>
 
